@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dome-asm",
+    "crates/dome-cli",
+    "crates/dome-config",
+    "crates/dome-core",
+    "crates/dome-device",
+    "crates/dome-display",
+    "crates/dome-engine",
+    "crates/dome-guest-agent",
+    "crates/dome-host-linux",
+    "crates/dome-image",
+    "crates/dome-net",
+    "crates/dome-obfuscation",
+    "crates/dome-plugin",
+    "crates/dome-supervisor",
+]
+default-members = ["crates/dome-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

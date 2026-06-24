@@ -1,0 +1,12 @@
+target/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.swp
+*.swo
+*~
+.env
+.env.*
+!.env.example
