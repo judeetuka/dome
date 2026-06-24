@@ -1,0 +1,12 @@
+[package]
+name = "dome-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dome-core = { path = "../dome-core" }
+
+[lints]
+workspace = true
