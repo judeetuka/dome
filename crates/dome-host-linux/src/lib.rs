@@ -1,0 +1,254 @@
+use std::env;
+use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeRoot {
+    root: PathBuf,
+}
+
+impl ProbeRoot {
+    pub fn host() -> Self {
+        Self {
+            root: PathBuf::from("/"),
+        }
+    }
+
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    fn path(&self, path: &str) -> PathBuf {
+        let trimmed = path.trim_start_matches('/');
+        self.root.join(trimmed)
+    }
+
+    fn read_to_string(&self, path: &str) -> Option<String> {
+        fs::read_to_string(self.path(path)).ok()
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        self.path(path).exists()
+    }
+
+    fn has_directory_entries(&self, path: &str) -> bool {
+        fs::read_dir(self.path(path))
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostReport {
+    pub platform: PlatformReport,
+    pub virtualization: VirtualizationReport,
+    pub iommu: IommuReport,
+    pub vfio: VfioReport,
+    pub cgroups: CgroupReport,
+    pub security: SecurityReport,
+    pub network: NetworkReport,
+    pub assembler: AssemblerReport,
+}
+
+impl HostReport {
+    pub fn probe_host() -> Self {
+        Self::probe_root(&ProbeRoot::host())
+    }
+
+    pub fn probe_root(root: &ProbeRoot) -> Self {
+        let cpuinfo = root.read_to_string("/proc/cpuinfo").unwrap_or_default();
+        let modules = root.read_to_string("/proc/modules").unwrap_or_default();
+        let status = root.read_to_string("/proc/self/status").unwrap_or_default();
+
+        Self {
+            platform: PlatformReport {
+                kernel_version: root.read_to_string("/proc/sys/kernel/osrelease"),
+            },
+            virtualization: VirtualizationReport {
+                cpu_virtualization_flag: has_virtualization_flag(&cpuinfo),
+                kvm_device_available: root.exists("/dev/kvm"),
+            },
+            iommu: IommuReport {
+                groups_detected: root.has_directory_entries("/sys/kernel/iommu_groups"),
+            },
+            vfio: VfioReport {
+                device_available: root.exists("/dev/vfio/vfio"),
+                module_loaded: modules.lines().any(|line| line.starts_with("vfio")),
+            },
+            cgroups: CgroupReport {
+                v2_available: root.exists("/sys/fs/cgroup/cgroup.controllers"),
+            },
+            security: SecurityReport {
+                seccomp_visible: status.lines().any(|line| line.starts_with("Seccomp:")),
+                landlock_visible: root.exists("/sys/kernel/security/landlock"),
+            },
+            network: NetworkReport {
+                namespace_visible: root.exists("/proc/self/ns/net"),
+            },
+            assembler: AssemblerReport {
+                gnu_as_available: executable_in_path("as"),
+                nasm_available: executable_in_path("nasm"),
+            },
+        }
+    }
+
+    pub fn to_toml(&self) -> String {
+        format!(
+            concat!(
+                "[platform]\n",
+                "kernel_version = {}\n\n",
+                "[virtualization]\n",
+                "cpu_virtualization_flag = {}\n",
+                "native_engine_device_available = {}\n\n",
+                "[iommu]\n",
+                "groups_detected = {}\n\n",
+                "[vfio]\n",
+                "device_available = {}\n",
+                "module_loaded = {}\n\n",
+                "[cgroups]\n",
+                "v2_available = {}\n\n",
+                "[security]\n",
+                "seccomp_visible = {}\n",
+                "landlock_visible = {}\n\n",
+                "[network]\n",
+                "namespace_visible = {}\n\n",
+                "[assembler]\n",
+                "gnu_as_available = {}\n",
+                "nasm_available = {}"
+            ),
+            toml_option_string(self.platform.kernel_version.as_deref()),
+            self.virtualization.cpu_virtualization_flag,
+            self.virtualization.kvm_device_available,
+            self.iommu.groups_detected,
+            self.vfio.device_available,
+            self.vfio.module_loaded,
+            self.cgroups.v2_available,
+            self.security.seccomp_visible,
+            self.security.landlock_visible,
+            self.network.namespace_visible,
+            self.assembler.gnu_as_available,
+            self.assembler.nasm_available,
+        )
+    }
+
+    pub fn to_human_text(&self) -> String {
+        format!(
+            concat!(
+                "Dome host capability report\n",
+                "kernel: {}\n",
+                "native engine device: {}\n",
+                "cpu virtualization flag: {}\n",
+                "iommu groups: {}\n",
+                "vfio device: {}\n",
+                "cgroups v2: {}\n",
+                "seccomp status: {}\n",
+                "landlock marker: {}\n",
+                "network namespace: {}\n",
+                "gnu as: {}\n",
+                "nasm: {}"
+            ),
+            self.platform.kernel_version.as_deref().unwrap_or("unknown"),
+            yes_no(self.virtualization.kvm_device_available),
+            yes_no(self.virtualization.cpu_virtualization_flag),
+            yes_no(self.iommu.groups_detected),
+            yes_no(self.vfio.device_available),
+            yes_no(self.cgroups.v2_available),
+            yes_no(self.security.seccomp_visible),
+            yes_no(self.security.landlock_visible),
+            yes_no(self.network.namespace_visible),
+            yes_no(self.assembler.gnu_as_available),
+            yes_no(self.assembler.nasm_available),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformReport {
+    pub kernel_version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VirtualizationReport {
+    pub cpu_virtualization_flag: bool,
+    pub kvm_device_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IommuReport {
+    pub groups_detected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VfioReport {
+    pub device_available: bool,
+    pub module_loaded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CgroupReport {
+    pub v2_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecurityReport {
+    pub seccomp_visible: bool,
+    pub landlock_visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkReport {
+    pub namespace_visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblerReport {
+    pub gnu_as_available: bool,
+    pub nasm_available: bool,
+}
+
+fn has_virtualization_flag(cpuinfo: &str) -> bool {
+    cpuinfo
+        .split_whitespace()
+        .any(|token| token == "vmx" || token == "svm")
+}
+
+fn executable_in_path(program: &str) -> bool {
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+
+    env::split_paths(&path).any(|directory| path_has_program(&directory, program))
+}
+
+fn path_has_program(directory: &Path, program: &str) -> bool {
+    let mut candidate = PathBuf::from(directory);
+    candidate.push(OsString::from(program));
+    candidate.is_file()
+}
+
+fn toml_option_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", escape_toml(value.trim())),
+        None => "null".to_owned(),
+    }
+}
+
+fn escape_toml(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}

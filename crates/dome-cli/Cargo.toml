@@ -1,0 +1,17 @@
+[package]
+name = "dome-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dome"
+path = "src/main.rs"
+
+[dependencies]
+dome-host-linux = { path = "../dome-host-linux" }
+dome-obfuscation = { path = "../dome-obfuscation" }
+
+[lints]
+workspace = true
