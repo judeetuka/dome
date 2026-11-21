@@ -46,6 +46,8 @@ pub struct LaunchRequest {
     pub cage: bool,
     /// Wall-clock limit for the whole boot.
     pub timeout: Duration,
+    /// Trap on denied syscalls instead of killing, so the number is reported.
+    pub diagnose_cage: bool,
 }
 
 impl LaunchRequest {
@@ -58,6 +60,7 @@ impl LaunchRequest {
             cmdline: "console=ttyS0 earlyprintk=ttyS0 panic=1".to_owned(),
             cage: false,
             timeout: Duration::from_secs(60),
+            diagnose_cage: false,
         }
     }
 
@@ -161,9 +164,14 @@ impl LinuxEngine {
         // The cage goes on after everything is prepared and before anything runs, so the
         // guest executes inside it rather than having it applied retroactively.
         if request.cage {
-            sandbox::harden_engine_process()?;
-            sandbox::unshare_chamber_namespaces()?;
-            sandbox::apply_seccomp_allowlist()?;
+            // Order is fixed by sandbox and is not renegotiable here. The diagnostic variant
+            // differs only in trapping instead of killing, so a missing allowlist entry can
+            // report its own number.
+            if request.diagnose_cage {
+                sandbox::apply_engine_cage_diagnostic(Some(&request.kernel))?;
+            } else {
+                sandbox::apply_engine_cage(Some(&request.kernel))?;
+            }
         }
 
         // The watch dog is started AFTER the cage: creating a thread before entering a user

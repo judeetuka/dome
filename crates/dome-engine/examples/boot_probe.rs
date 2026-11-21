@@ -21,6 +21,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         request.initramfs = Some(initramfs.to_path_buf());
     }
 
+    if std::env::args().any(|arg| arg == "--cage" || arg == "--diagnose") {
+        request.cage = true;
+        println!("cage: enabled");
+    }
+    if std::env::args().any(|arg| arg == "--diagnose") {
+        request.diagnose_cage = true;
+        println!("cage: trapping denials for diagnosis");
+    }
+
     println!("booting {} ...", kernel.display());
     let started = std::time::Instant::now();
     let outcome = engine.launch(&request)?;

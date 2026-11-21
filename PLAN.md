@@ -390,7 +390,7 @@ Wave M3 (Linux Native Engine — 7 tasks, 4 parallel):
 ├── T17: Guest memory manager [DONE]
 ├── T18: Kernel loader (bzImage) [DONE]
 ├── T19: VCPU lifecycle (create, init, run loop skeleton) [deep]
-├── T20: Engine process sandbox [PARTIAL: seccomp+ns+privs done, Landlock owed]
+├── T20: Engine process sandbox [DONE]
 └── T21: M3 integration tests (capability, failure, minimal boot) [unspecified-high]
 
 Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
@@ -1800,14 +1800,50 @@ Max Concurrent: 6 (M1 wave)
   Not yet done: **Landlock** (the crate exposes its builders as trait methods; needs
   `RulesetAttr`/`RulesetCreatedAttr` imports) and the trace-derived allowlist above.
 
+  **Completed** (2026). Implementation is `crates/dome-engine/src/sandbox.rs`, with
+  `crates/dome-engine/src/bin/cage_probe.rs` as the disposable child. **Eight tests.**
+
+  Layers, all verified by effect rather than by call: `PR_SET_NO_NEW_PRIVS`,
+  `PR_SET_DUMPABLE = 0`, `RLIMIT_CORE = 0`, user+mount+net namespaces with identity mapping,
+  Landlock (fully enforced: reads inside, write inside granted, write outside **denied**), and
+  a seccomp allowlist that kills `reboot(2)` with SIGSYS while ordinary work succeeds.
+
+  **The decisive test: the real kernel boots inside the production cage** and prints
+  `Run /init as init process` and our init's direct serial line. The cage is not a hypothesis;
+  a guest has run under it.
+
+  Five measured findings, each of which forced a design change:
+
+  1. **`unshare(CLONE_NEWUSER)` returns EINVAL in a multithreaded process.** Namespaces must
+     be established before any thread exists.
+  2. **`CLONE_NEWPID` breaks thread creation.** Including it makes every later
+     `clone(CLONE_THREAD)` fail with EINVAL, because threads must share the caller's PID
+     namespace and the caller does not move into the new one. A chamber must unshare the PID
+     namespace, then **fork**, and only the child may create threads. Proven by
+     `cage_probe pid-after-fork`: `child_pid_one=true`, `child_thread_ok=true`. This is now the
+     M4 process model, not speculation.
+  3. **`no_new_privs` makes `/proc/self/setgroups` unwritable**, so the uid/gid maps must be
+     written *before* privilege hardening. Without maps the process has no identity and
+     `clone` fails with EINVAL.
+  4. **`NoNewPrivs` and seccomp are per-thread**; `/proc/self/status` reports the group leader,
+     so tests must read `/proc/thread-self/status`.
+  5. **`SeccompAction::KillProcess` prevents diagnosis.** The kernel kills without delivering a
+     catchable signal, so a missing entry looks like a silent exit. `Trap` plus a SIGSYS
+     handler names the number; that is how `clock_nanosleep` (230) was found.
+
+  Allowlist provenance: Firecracker's published filter (syscalls 0..=97) plus an explicit set
+  of higher-numbered calls, **then validated by booting the real kernel inside the cage**. A
+  missing entry is discovered empirically, which is stronger evidence than a trace of one run,
+  though a Dome-specific trace is still the stated goal (T56).
+
   **Acceptance Criteria**:
-  - [x] `no_new_privs`, non-dumpable, and `RLIMIT_CORE = 0` applied and asserted from a child
-  - [x] Namespace isolation verified by comparing namespace inodes before and after
-  - [x] seccomp allowlist applied; a denied syscall dies with SIGSYS
-  - [x] A test proves the filter does not break ordinary operation
-  - [x] The multithreading constraint on `unshare` is measured and documented
-  - [ ] Landlock filesystem restriction
-  - [ ] Allowlist derived from Dome's own trace rather than a cited baseline
+  - [x] `no_new_privs`, non-dumpable, `RLIMIT_CORE = 0` asserted from a child
+  - [x] Namespaces verified by comparing namespace inodes
+  - [x] Identity mapping written, and its ordering constraint measured
+  - [x] Landlock denies writes outside the granted paths
+  - [x] seccomp kills a denied syscall while permitting normal work
+  - [x] The real kernel boots inside the full cage
+  - [x] Every ordering constraint documented where it is enforced
 
 - [ ] 21. **M3 Integration Tests (Capability, Failure, Minimal Boot)**
 

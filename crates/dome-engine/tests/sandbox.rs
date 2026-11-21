@@ -107,3 +107,71 @@ fn the_allowlist_still_permits_normal_work() {
     );
     assert!(text.contains("CAGE_APPLIED"), "filter not applied: {text}");
 }
+
+#[test]
+fn landlock_denies_writes_outside_the_granted_paths() {
+    let output = probe("landlock");
+    let text = text_of(&output);
+
+    assert!(output.status.success(), "probe failed: {text}");
+    assert!(
+        text.contains("enforcement=full"),
+        "not fully enforced: {text}"
+    );
+    // The restriction must be real: allowed inside, refused outside.
+    assert!(text.contains("read_proc=true"), "reads broke: {text}");
+    assert!(
+        text.contains("write_granted=true"),
+        "granted write broke: {text}"
+    );
+    assert!(
+        text.contains("write_denied=true"),
+        "a write outside the grants succeeded: {text}"
+    );
+}
+
+#[test]
+fn a_real_kernel_boots_inside_the_cage() {
+    let kernel = dome_test_utils::test_fixture_path("kernel/vmlinuz-virt");
+    if !kernel.is_file() {
+        eprintln!("skipping: kernel fixture missing");
+        return;
+    }
+
+    let initramfs = dome_test_utils::test_fixture_path("kernel/initramfs.cpio.gz");
+    let initramfs_arg = if initramfs.is_file() {
+        initramfs.to_string_lossy().into_owned()
+    } else {
+        "-".to_owned()
+    };
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cage_probe"))
+        .arg("boot")
+        .arg(&kernel)
+        .arg(&initramfs_arg)
+        .output()
+        .expect("spawn cage_probe boot");
+
+    let text = text_of(&output);
+
+    if text.contains("SKIP_NO_KVM") {
+        eprintln!("skipping: {text}");
+        return;
+    }
+
+    assert!(output.status.success(), "caged boot failed: {text}");
+    assert!(
+        text.contains("CAGE_BOOT_OK"),
+        "boot did not complete: {text}"
+    );
+    // The guest ran, and it ran inside the cage: same kernel markers as the uncaged test.
+    assert!(text.contains("Linux version"), "no kernel output: {text}");
+    assert!(
+        text.contains("Run /init as init process"),
+        "never reached userspace under the cage: {text}"
+    );
+    assert!(
+        text.contains("dome-init: direct serial write from userspace"),
+        "our init did not run under the cage: {text}"
+    );
+}

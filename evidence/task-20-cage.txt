@@ -1,15 +1,21 @@
-# T20 — engine cage
-# command: cargo test -p dome-engine --test sandbox -j4
+# T20 — engine cage, with a real kernel booting inside it
+# command: cargo test -p dome-engine --test sandbox -j4 -- --test-threads=1
 
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+a_real_kernel_boots_inside_the_cage ... ok
+core_dumps_are_disabled ... ok
+denied_syscall_kills_the_process ... ok
+landlock_denies_writes_outside_the_granted_paths ... ok
+namespaces_change ... ok
+no_new_privs_is_set ... ok
+process_cannot_be_dumped ... ok
+the_allowlist_still_permits_normal_work ... ok
+
+# caged boot, from cage_probe boot:
+CAGE_BOOT_OK exits=37944
+[    0.000000] Linux version 6.12.115-0-virt ...
+[    1.787815] Run /init as init process
+dome-init: direct serial write from userspace
+
+# pid namespace + fork (the M4 process model):
+child_pid_one=true
+child_thread_ok=true
