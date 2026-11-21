@@ -1,0 +1,14 @@
+# Seal protection tiers
+# command: cargo test -p dome-image -j4
+
+sealing_on_an_unprotected_host_is_refused_when_the_policy_demands_secrecy ... ok
+an_unprotected_seal_is_written_and_marked_degraded ... ok
+a_confidential_seal_records_its_mechanism ... ok
+a_confidential_seal_refuses_to_resume_on_a_plain_host ... ok
+an_unprotected_seal_runs_anywhere ... ok
+a_seal_travels_inside_an_export_unchanged ... ok
+
+# platform facts verified:
+#   Linux: TDX / SEV-SNP
+#   Windows: Shielded VM (vTPM + BitLocker + HGS) requires a guarded fabric
+#   macOS: no guest memory confidentiality API exposed

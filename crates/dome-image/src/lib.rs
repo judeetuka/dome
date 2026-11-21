@@ -6,6 +6,7 @@ pub mod image_error;
 pub mod manifest;
 pub mod reader;
 pub mod seal;
+pub mod tier;
 pub mod writer;
 
 pub use image_error::ImageError;

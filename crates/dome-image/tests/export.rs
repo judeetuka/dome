@@ -6,12 +6,15 @@ use dome_crypto::pq::suite2_generate_mldsa_key;
 use dome_crypto::{generate_signing_keypair, signing_key_from_pkcs8};
 use dome_image::FoundationFormat;
 use dome_image::FoundationManifest;
+use dome_image::export::ExportMeta;
 use dome_image::export::{
-    EXPORT_FORMAT, Export, PORTABLE_BASE, find_host_path, read_export, write_export,
+    EXPORT_FORMAT, Export, ExportMeta as Meta, PORTABLE_BASE, find_host_path, read_export,
+    write_export,
 };
 use dome_image::image_error::ImageError;
 use dome_image::reader::ContainerVerifier;
 use dome_image::seal::{SECTION_CHAMBER, Seal, write_seal};
+use dome_image::tier::HostProtection;
 
 const CELL: &str = "[cell]\nfoundation = \"dome/alpine:3.20\"\nmemory_mib = 512\n";
 
@@ -95,14 +98,21 @@ fn a_seal_travels_inside_an_export_unchanged() {
     let seal_bytes = write_seal(
         &seal,
         &manifest("/tmp/base.img"),
+        HostProtection::UNPROTECTED,
         &keys.file,
         &keys.ed,
         &keys.ml,
     )
     .expect("seal");
 
-    let export =
-        Export::new(CELL, "dome/alpine:3.20", Some(seal_bytes.clone()), "log", 1).expect("export");
+    // The seal is encrypted, so its tier cannot be read back here; the caller declares it.
+    let export = Export::with_meta(
+        CELL,
+        Some(seal_bytes.clone()),
+        "log",
+        ExportMeta::new("dome/alpine:3.20", 1).with_seal_protection(HostProtection::UNPROTECTED),
+    )
+    .expect("export");
     let bytes = write_export(
         &export,
         &manifest("/tmp/base.img"),
@@ -200,4 +210,78 @@ fn ordinary_container_paths_are_not_mistaken_for_host_paths() {
         find_host_path("prefix /root/.ssh/id").as_deref(),
         Some("/root/.ssh/id")
     );
+}
+
+#[test]
+fn an_export_refuses_a_host_that_cannot_meet_the_policy() {
+    // Same rule as a seal: a package that wants secrecy will not be built on a host that
+    // cannot keep it.
+    let error = Export::with_meta(
+        CELL,
+        None,
+        "",
+        Meta::new("dome/alpine:3.20", 0).requiring_confidentiality(),
+    )
+    .unwrap_err();
+
+    assert!(format!("{error}").contains("confidential"), "{error}");
+}
+
+#[test]
+fn an_export_refuses_to_understate_a_confidential_seal() {
+    // The seal is encrypted, so the caller declares its tier; a mismatch is refused rather
+    // than letting a package launder a confidential chamber into a plain one.
+    let error = Export::with_meta(
+        CELL,
+        Some(vec![1, 2, 3]),
+        "",
+        Meta::new("dome/alpine:3.20", 0).with_seal_protection(HostProtection::confidential(
+            dome_image::tier::ConfidentialMechanism::Tdx,
+        )),
+    )
+    .unwrap_err();
+
+    assert!(format!("{error}").contains("claims"), "{error}");
+}
+
+#[test]
+fn a_packaged_seal_must_declare_its_tier() {
+    let error = Export::with_meta(
+        CELL,
+        Some(vec![1, 2, 3]),
+        "",
+        Meta::new("dome/alpine:3.20", 0),
+    )
+    .unwrap_err();
+
+    assert!(format!("{error}").contains("without declaring"), "{error}");
+}
+
+#[test]
+fn an_export_records_its_own_tier() {
+    let keys = keys();
+    let export = Export::with_meta(
+        CELL,
+        None,
+        "",
+        Meta::new("dome/alpine:3.20", 7)
+            .on_host(HostProtection::confidential(
+                dome_image::tier::ConfidentialMechanism::SevSnp,
+            ))
+            .requiring_confidentiality(),
+    )
+    .expect("export");
+
+    let bytes = write_export(
+        &export,
+        &manifest("/tmp/base.img"),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("write");
+    let (recovered, _) = read_export(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    assert!(recovered.protection().expect("tier").is_confidential());
+    assert!(!recovered.is_degraded());
 }

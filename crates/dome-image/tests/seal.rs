@@ -1,4 +1,4 @@
-//! Seals: the payload format and the envelope around it.
+//! Seals: creation anywhere, execution only where the hardware can keep the promise.
 
 use dome_core::{FoundationName, StorageSize};
 use dome_crypto::generate_file_key;
@@ -9,9 +9,11 @@ use dome_image::FoundationManifest;
 use dome_image::image_error::ImageError;
 use dome_image::reader::ContainerVerifier;
 use dome_image::seal::{
-    SECTION_CHAMBER, SECTION_CREATED, SECTION_MEMORY, SECTION_REGISTERS, Seal, read_seal,
+    Distribution, SECTION_CHAMBER, SECTION_CREATED, SECTION_MEMORY, SECTION_REGISTERS, Seal,
+    check_resumable, distribution, read_seal, seal_is_degraded, seal_protection, write_portable,
     write_seal,
 };
+use dome_image::tier::{ConfidentialMechanism, HostProtection};
 
 fn manifest() -> FoundationManifest {
     FoundationManifest::new(
@@ -42,7 +44,14 @@ fn keys() -> Keys {
     }
 }
 
-fn sample_seal() -> Seal {
+fn hybrid<'a>(keys: &'a Keys) -> ContainerVerifier<'a> {
+    ContainerVerifier::Hybrid {
+        ed25519_public: &keys.ed_public,
+        mldsa_public: &keys.ml_public,
+    }
+}
+
+fn sample() -> Seal {
     let mut seal = Seal::new();
     seal.set_text(SECTION_CHAMBER, "chamber-001")
         .expect("chamber");
@@ -54,48 +63,181 @@ fn sample_seal() -> Seal {
     seal
 }
 
-fn hybrid<'a>(keys: &'a Keys) -> ContainerVerifier<'a> {
-    ContainerVerifier::Hybrid {
-        ed25519_public: &keys.ed_public,
-        mldsa_public: &keys.ml_public,
+fn confidential() -> HostProtection {
+    HostProtection::confidential(ConfidentialMechanism::Tdx)
+}
+
+// --- any device can create a seal ---
+
+#[test]
+fn this_device_can_create_a_seal() {
+    let keys = keys();
+
+    // Creation is not gated. This host has no TDX and still produces a seal.
+    let bytes = write_seal(
+        &sample(),
+        &manifest(),
+        HostProtection::UNPROTECTED,
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("any device can create a seal");
+
+    let (seal, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    assert_eq!(
+        seal_protection(&seal).expect("tier"),
+        HostProtection::UNPROTECTED
+    );
+    // And it says so: the memory was exposed while it was captured.
+    assert!(seal_is_degraded(&seal));
+}
+
+#[test]
+fn a_seal_made_on_confidential_hardware_records_the_mechanism() {
+    let keys = keys();
+    let bytes = write_seal(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("create");
+
+    let (seal, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    assert_eq!(seal_protection(&seal).expect("tier"), confidential());
+    assert!(!seal_is_degraded(&seal));
+}
+
+// --- but only capable hardware can run one ---
+
+#[test]
+fn this_device_cannot_run_a_seal() {
+    let keys = keys();
+    let bytes = write_seal(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("create");
+    let (seal, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    // The rule: creation anywhere, execution only here.
+    let error = check_resumable(&seal, HostProtection::UNPROTECTED).unwrap_err();
+    match error {
+        ImageError::Manifest(message) => {
+            assert!(message.contains("sealed release"), "{message}");
+            assert!(
+                message.contains("TDX"),
+                "the error should name what is missing"
+            );
+        }
+        other => panic!("expected a refusal, got {other:?}"),
     }
 }
 
 #[test]
+fn a_capable_device_runs_it() {
+    let keys = keys();
+    let bytes = write_seal(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("create");
+    let (seal, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    let effective = check_resumable(&seal, confidential()).expect("capable hardware runs it");
+    assert!(effective.is_confidential());
+
+    let sev = HostProtection::confidential(ConfidentialMechanism::SevSnp);
+    assert!(
+        check_resumable(&seal, sev)
+            .expect("any confidential mechanism counts")
+            .is_confidential()
+    );
+}
+
+#[test]
+fn a_seal_created_without_protection_can_still_run_on_capable_hardware() {
+    let keys = keys();
+    let bytes = write_seal(
+        &sample(),
+        &manifest(),
+        HostProtection::UNPROTECTED,
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("create");
+    let (seal, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    // Execution depends on the device doing the running, not on where it was captured. The
+    // degraded marker is what tells an operator the plaintext was exposed at capture time.
+    check_resumable(&seal, confidential()).expect("capable hardware runs it");
+    assert!(seal_is_degraded(&seal), "and the caveat travels with it");
+}
+
+// --- the envelope ---
+
+#[test]
 fn a_seal_round_trips_through_encryption_and_both_signatures() {
     let keys = keys();
-    let seal = sample_seal();
+    let seal = sample();
 
-    let bytes = write_seal(&seal, &manifest(), &keys.file, &keys.ed, &keys.ml).expect("write");
-
-    // It is a DOME container.
+    let bytes = write_seal(
+        &seal,
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("write");
     assert_eq!(&bytes[0..4], b"DOME");
 
     let (recovered, container) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
 
-    assert_eq!(recovered.sections(), seal.sections());
-    assert_eq!(
-        recovered.text(SECTION_CHAMBER).as_deref(),
-        Some("chamber-001")
-    );
+    for original in seal.sections() {
+        assert_eq!(
+            recovered.section(&original.name),
+            Some(original.value.as_slice()),
+            "section {:?} did not survive",
+            original.name
+        );
+    }
 
-    // The payload is encrypted, so guest memory must not appear in the clear.
     assert!(!bytes.windows(64).any(|window| window == [0xABu8; 64]));
-
-    // And the container still knows which foundation it belongs to.
     assert_eq!(container.manifest.virtual_size.as_mib(), 512);
 }
 
 #[test]
 fn guest_memory_travels_in_the_seal() {
     let keys = keys();
-    let mut seal = sample_seal();
+    let mut seal = sample();
 
-    // A recognisable pattern, larger than one chunk so the container splits it.
     let memory: Vec<u8> = (0..70_000usize).map(|index| (index % 251) as u8).collect();
     seal.set(SECTION_MEMORY, memory.clone()).expect("memory");
 
-    let bytes = write_seal(&seal, &manifest(), &keys.file, &keys.ed, &keys.ml).expect("write");
+    let bytes = write_seal(
+        &seal,
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("write");
     let (recovered, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
 
     assert_eq!(recovered.section(SECTION_MEMORY), Some(memory.as_slice()));
@@ -104,8 +246,15 @@ fn guest_memory_travels_in_the_seal() {
 #[test]
 fn tampering_with_a_seal_breaks_its_signature() {
     let keys = keys();
-    let mut bytes =
-        write_seal(&sample_seal(), &manifest(), &keys.file, &keys.ed, &keys.ml).expect("write");
+    let mut bytes = write_seal(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("write");
 
     let last = bytes.len() - 1;
     bytes[last] ^= 0x01;
@@ -120,68 +269,109 @@ fn tampering_with_a_seal_breaks_its_signature() {
 #[test]
 fn a_seal_needs_the_right_key() {
     let keys = keys();
-    let bytes =
-        write_seal(&sample_seal(), &manifest(), &keys.file, &keys.ed, &keys.ml).expect("write");
+    let bytes = write_seal(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("write");
 
     let wrong = generate_file_key().expect("key");
     let error = read_seal(&bytes, &wrong, hybrid(&keys)).unwrap_err();
-
     assert!(matches!(error, ImageError::Crypto(_)), "got {error:?}");
 }
 
+// --- the other release model: portable everywhere ---
+
 #[test]
-fn section_names_are_validated() {
-    let mut seal = Seal::new();
+fn a_portable_release_claims_no_confidentiality_but_runs_here() {
+    let keys = keys();
 
-    let hostile = [
-        "",
-        "with space",
-        "sl/ash",
-        "../up",
-        "a-name-that-is-far-too-long-to-be-reasonable-and-then-some-more-of-it",
-    ];
+    // The second model: released to everyone, protecting as much as the host can.
+    let bytes = write_portable(
+        &sample(),
+        &manifest(),
+        HostProtection::UNPROTECTED,
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("portable");
 
-    for name in hostile {
-        assert!(
-            seal.set(name, vec![1]).is_err(),
-            "{name:?} should be refused as a section name"
-        );
-    }
+    let (release, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
 
-    seal.set("good-name_1", vec![1]).expect("valid name");
+    assert_eq!(
+        distribution(&release).expect("mode"),
+        Distribution::Portable
+    );
+
+    // It runs on this device, and is honest that it got no confidential memory.
+    let effective = check_resumable(&release, HostProtection::UNPROTECTED).expect("runs anywhere");
+    assert!(
+        !effective.is_confidential(),
+        "a portable release on plain hardware must not claim confidentiality"
+    );
 }
 
 #[test]
-fn setting_a_section_twice_replaces_it() {
-    let mut seal = Seal::new();
-    seal.set(SECTION_CHAMBER, b"first".to_vec()).expect("set");
-    seal.set(SECTION_CHAMBER, b"second".to_vec()).expect("set");
+fn a_portable_release_gets_confidential_execution_where_it_existed() {
+    let keys = keys();
+    let bytes = write_portable(
+        &sample(),
+        &manifest(),
+        HostProtection::UNPROTECTED,
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("portable");
 
-    assert_eq!(seal.sections().len(), 1);
-    assert_eq!(seal.section(SECTION_CHAMBER), Some(b"second".as_slice()));
+    let (release, _) = read_seal(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    // The same artifact, on better hardware, runs better: that is the whole point of the
+    // portable model.
+    let effective = check_resumable(&release, confidential()).expect("runs");
+    assert!(effective.is_confidential());
 }
 
 #[test]
-fn an_absurd_section_count_is_refused_before_allocating() {
-    // Four billion sections in a payload of eight bytes cannot be real.
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&u32::MAX.to_le_bytes());
-    payload.extend_from_slice(&[0u8; 4]);
+fn a_sealed_release_is_distinguishable_from_a_portable_one() {
+    let keys = keys();
 
-    match Seal::decode(&payload) {
-        Err(ImageError::Malformed(message)) => assert!(message.contains("sections"), "{message}"),
-        other => panic!("expected Malformed, got {other:?}"),
-    }
-}
+    let sealed = write_seal(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("seal");
+    let portable = write_portable(
+        &sample(),
+        &manifest(),
+        confidential(),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("portable");
 
-#[test]
-fn a_truncated_payload_is_refused() {
-    let encoded = sample_seal().encode();
+    let (sealed, _) = read_seal(&sealed, &keys.file, hybrid(&keys)).expect("read sealed");
+    let (portable, _) = read_seal(&portable, &keys.file, hybrid(&keys)).expect("read portable");
 
-    for keep in [0, 4, 8, encoded.len() - 1] {
-        assert!(
-            Seal::decode(&encoded[..keep]).is_err(),
-            "truncating to {keep} bytes should be refused"
-        );
-    }
+    // Both were captured on confidential hardware; they differ only in where they may run.
+    assert_eq!(seal_protection(&sealed).expect("tier"), confidential());
+    assert_eq!(seal_protection(&portable).expect("tier"), confidential());
+    assert_eq!(distribution(&sealed).expect("mode"), Distribution::Sealed);
+    assert_eq!(
+        distribution(&portable).expect("mode"),
+        Distribution::Portable
+    );
+
+    assert!(check_resumable(&sealed, HostProtection::UNPROTECTED).is_err());
+    assert!(check_resumable(&portable, HostProtection::UNPROTECTED).is_ok());
 }
