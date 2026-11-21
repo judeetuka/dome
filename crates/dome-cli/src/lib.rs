@@ -195,6 +195,22 @@ enum FoundationAction {
         store: Option<PathBuf>,
     },
 
+    /// Store an image or a chamber layer as a new foundation
+    Commit {
+        /// The image or layer to store
+        #[arg(long, value_name = "PATH")]
+        from: PathBuf,
+        /// A human-readable name for the list
+        #[arg(long, value_name = "NAME", required = true)]
+        name: String,
+        /// Target architecture the image was built for
+        #[arg(long, value_name = "ARCH", default_value = "x86_64")]
+        arch: String,
+        /// Store directory
+        #[arg(long, value_name = "DIR")]
+        store: Option<PathBuf>,
+    },
+
     /// Remove foundations no chamber references
     Prune {
         /// Store directory
@@ -432,6 +448,29 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
                     ));
                 }
                 Ok(report)
+            }
+
+            FoundationAction::Commit {
+                from,
+                name,
+                arch,
+                store,
+            } => {
+                let store = dome_image::store::FoundationStore::at(
+                    store.unwrap_or_else(dome_image::store::FoundationStore::default_root),
+                );
+
+                let entry = store
+                    .commit(&from, &arch, &name)
+                    .map_err(|error| CliError::Failed(error.to_string()))?;
+
+                Ok(format!(
+                    "stored {}\n  digest: {}\n  arch: {}\n  size: {}\n",
+                    name,
+                    entry.digest,
+                    entry.arch,
+                    format_size(entry.size)
+                ))
             }
 
             FoundationAction::Prune { store } => {

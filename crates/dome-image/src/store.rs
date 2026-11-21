@@ -223,6 +223,25 @@ impl FoundationStore {
         Ok(found)
     }
 
+    /// Turn a built or modified image into a stored foundation.
+    ///
+    /// This is the operation that makes "start from nothing and install what you need" cheap:
+    /// a chamber installs a package, writes it into its layer, and the layer is committed as a
+    /// foundation. Every later chamber starts from that digest and pays nothing again, because
+    /// the store already holds the bytes.
+    ///
+    /// The committed bytes are whatever is handed over: nothing is filtered. A layer carrying a
+    /// package cache or a private key will carry it into every chamber started from the result,
+    /// so cleaning the layer before committing is the caller's job.
+    pub fn commit(
+        &self,
+        layer: &Path,
+        arch: &str,
+        name: &str,
+    ) -> Result<FoundationEntry, ImageError> {
+        self.insert(layer, arch, name)
+    }
+
     /// Give a chamber a writable layer over a foundation.
     ///
     /// The reference is recorded before the layer is returned, so a crash between the two

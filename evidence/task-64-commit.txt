@@ -1,0 +1,13 @@
+# install once, commit, reuse
+# command: cargo test -p dome-image --test store -j4
+
+a_committed_layer_becomes_a_foundation_of_its_own ... ok
+committing_the_same_install_twice_stores_it_once ... ok
+a_chamber_can_start_from_a_committed_foundation ... ok
+
+# measured on this Arch host:
+#   bash                       9.6 MiB
+#   pacman+keyring+mirrorlist ~7 MiB
+#   gcc                      220.9 MiB
+#   Arch linux package       151.5 MiB (kernel + modules)
+#   Dome bzImage              11.7 MB

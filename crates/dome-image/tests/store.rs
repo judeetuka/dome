@@ -246,3 +246,73 @@ fn a_digest_that_was_never_stored_is_reported_as_missing() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// --- install once, commit, reuse ---
+
+#[test]
+fn a_committed_layer_becomes_a_foundation_of_its_own() {
+    let dir = scratch("commit");
+    let store = FoundationStore::at(dir.join("store"));
+    let base = store
+        .insert(
+            &foundation(&dir, "base.img", b"bare base"),
+            ARCH_X86_64,
+            "base",
+        )
+        .expect("insert");
+
+    // A chamber installs things; its layer grows.
+    let layer = store.overlay(&base.digest, "dev").expect("overlay");
+    std::fs::write(&layer.path, b"bare base plus fish, rust and neovim").expect("write");
+
+    // Committing that layer makes the installed set a foundation in its own right.
+    let committed = store
+        .commit(&layer.path, ARCH_X86_64, "dev-tools")
+        .expect("commit");
+
+    assert_ne!(
+        committed.digest, base.digest,
+        "it is a different foundation now"
+    );
+    assert_eq!(committed.name, "dev-tools");
+    assert_eq!(store.list().expect("list").len(), 2, "the base is kept");
+}
+
+#[test]
+fn committing_the_same_install_twice_stores_it_once() {
+    let dir = scratch("commit-twice");
+    let store = FoundationStore::at(dir.join("store"));
+    let first = dir.join("first.img");
+    let second = dir.join("second.img");
+    std::fs::write(&first, b"same installed set").expect("first");
+    std::fs::write(&second, b"same installed set").expect("second");
+
+    let one = store.commit(&first, ARCH_X86_64, "dev").expect("commit");
+    let two = store
+        .commit(&second, ARCH_X86_64, "dev-again")
+        .expect("commit");
+
+    // Two people installing the same set converge on one foundation, which is what makes
+    // sharing it cheap.
+    assert_eq!(one.digest, two.digest);
+    assert_eq!(store.list().expect("list").len(), 1);
+}
+
+#[test]
+fn a_chamber_can_start_from_a_committed_foundation() {
+    let dir = scratch("commit-start");
+    let store = FoundationStore::at(dir.join("store"));
+    let layer_source = dir.join("dev.img");
+    std::fs::write(&layer_source, b"dev tools present").expect("image");
+
+    let committed = store
+        .commit(&layer_source, ARCH_X86_64, "dev")
+        .expect("commit");
+    let chamber_layer = store.overlay(&committed.digest, "work").expect("overlay");
+
+    assert_eq!(
+        std::fs::read(&chamber_layer.path).expect("read"),
+        b"dev tools present",
+        "the chamber starts from exactly the committed set"
+    );
+}

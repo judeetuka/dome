@@ -3804,6 +3804,16 @@ Max Concurrent: 6 (M1 wave)
   > `dome-crypto` gained a streaming SHA-256, because digesting a 400 MB foundation must not
   > mean allocating 400 MB.
 
+  > **The commit half is done too.** `dome foundation commit --from <image|layer> --name <n>`
+  > stores a built or modified image as a foundation of its own, which is what makes "start from
+  > a clean sheet and install only what you need" cheap: install once, commit, and every later
+  > chamber starts from that digest with the bytes already stored.
+  >
+  > Three tests cover it: a committed layer becomes a separate foundation, committing the same
+  > install twice stores it once, and a chamber started from a committed foundation gets exactly
+  > that set. `commit` stores the layer unfiltered and says so — a cache or a key in the layer
+  > travels with it, and deciding what is sensitive is not something the store can know.
+
   **Acceptance Criteria**:
   - [ ] Two chambers from one foundation use one foundation's worth of disk
   - [ ] Overlay writes never mutate the shared foundation (digest stability test)
