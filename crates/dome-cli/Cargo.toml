@@ -10,6 +10,7 @@ name = "dome"
 path = "src/main.rs"
 
 [dependencies]
+thiserror = { workspace = true }
 dome-host-linux = { path = "../dome-host-linux" }
 dome-obfuscation = { path = "../dome-obfuscation" }
 

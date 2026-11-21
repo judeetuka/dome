@@ -269,19 +269,10 @@ pub trait PluginHost {
     fn evaluate(&self, invocation: &PluginInvocation) -> Result<PluginVerdict, Self::Error>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PluginError {
+    #[error("plugin id cannot be empty")]
     EmptyPluginId,
+    #[error("plugin version cannot be empty")]
     EmptyPluginVersion,
 }
-
-impl std::fmt::Display for PluginError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EmptyPluginId => formatter.write_str("plugin id cannot be empty"),
-            Self::EmptyPluginVersion => formatter.write_str("plugin version cannot be empty"),
-        }
-    }
-}
-
-impl std::error::Error for PluginError {}

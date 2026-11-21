@@ -1,5 +1,22 @@
 use dome_core::{AperturePolicy, CellSpec, FileApertureMode, GpioDirection, PortProtocol};
 
+/// Errors raised while turning a `.cell.toml` blueprint into domain types.
+///
+/// Parsing and semantic validation are deliberately separate: a blueprint can be
+/// syntactically valid TOML and still be unacceptable (zero memory, a blocked
+/// aperture path, a duplicate host port).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigError {
+    #[error("failed to parse blueprint TOML: {0}")]
+    Parse(String),
+    #[error("missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("invalid value for {field}: {reason}")]
+    InvalidValue { field: &'static str, reason: String },
+    #[error("unknown {kind}: {value}")]
+    Unknown { kind: &'static str, value: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Blueprint {
     cell: CellSpec,

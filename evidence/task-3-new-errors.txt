@@ -1,0 +1,8 @@
+# T3 — new error enums compile and render
+# dome-core::DomeError and dome-cli::CliError message stability, plus
+# dome-config::ConfigError / dome-engine::EngineError compiling with #[derive(Error)].
+
+running 4 tests
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0

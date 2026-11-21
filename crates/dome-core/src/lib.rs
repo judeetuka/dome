@@ -1,36 +1,28 @@
-use std::fmt::{Display, Formatter};
 use std::num::{NonZeroU16, NonZeroU64};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DomeError {
+    #[error("chamber id cannot be empty")]
     EmptyChamberId,
+    #[error("foundation name cannot be empty")]
     EmptyFoundationName,
+    #[error("host aperture path cannot be empty")]
     EmptyHostPath,
+    #[error("guest aperture path cannot be empty")]
     EmptyGuestPath,
+    #[error("port {0} is invalid")]
     InvalidPort(u16),
+    #[error("cpu count must be greater than zero")]
     ZeroCpuCount,
+    #[error("gpio line must be greater than zero")]
     ZeroGpioLine,
+    #[error("memory must be greater than zero")]
     ZeroMemory,
+    #[error("storage must be greater than zero")]
     ZeroStorage,
 }
-
-impl Display for DomeError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EmptyChamberId => formatter.write_str("chamber id cannot be empty"),
-            Self::EmptyFoundationName => formatter.write_str("foundation name cannot be empty"),
-            Self::EmptyHostPath => formatter.write_str("host aperture path cannot be empty"),
-            Self::EmptyGuestPath => formatter.write_str("guest aperture path cannot be empty"),
-            Self::InvalidPort(port) => write!(formatter, "port {port} is invalid"),
-            Self::ZeroCpuCount => formatter.write_str("cpu count must be greater than zero"),
-            Self::ZeroGpioLine => formatter.write_str("gpio line must be greater than zero"),
-            Self::ZeroMemory => formatter.write_str("memory must be greater than zero"),
-            Self::ZeroStorage => formatter.write_str("storage must be greater than zero"),
-        }
-    }
-}
-
-impl std::error::Error for DomeError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FoundationName(String);

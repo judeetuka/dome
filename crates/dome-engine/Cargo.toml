@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+thiserror = { workspace = true }
 dome-core = { path = "../dome-core" }
 
 [lints]

@@ -89,23 +89,14 @@ impl OutputFormat {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CliError {
+    #[error("missing value for {0}")]
     MissingValue(&'static str),
+    #[error("unknown command: {0}")]
     UnknownCommand(String),
+    #[error("unknown flag: {0}")]
     UnknownFlag(String),
+    #[error("unknown output format: {0}")]
     UnknownFormat(String),
 }
-
-impl std::fmt::Display for CliError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingValue(flag) => write!(formatter, "missing value for {flag}"),
-            Self::UnknownCommand(command) => write!(formatter, "unknown command: {command}"),
-            Self::UnknownFlag(flag) => write!(formatter, "unknown flag: {flag}"),
-            Self::UnknownFormat(format) => write!(formatter, "unknown output format: {format}"),
-        }
-    }
-}
-
-impl std::error::Error for CliError {}

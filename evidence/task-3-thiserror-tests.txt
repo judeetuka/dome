@@ -1,0 +1,82 @@
+# T3 — thiserror migration: full workspace test run
+# command: cargo test --workspace -j4
+# captured: 2026 (sandbox, offline registry)
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/build/dome-asm/d28c4ebb2cab3aa0/out/dome_asm-d28c4ebb2cab3aa0)
+     Running tests/routine_metadata.rs (target/debug/build/dome-asm/027089faceb740bc/out/routine_metadata-027089faceb740bc)
+     Running unittests src/lib.rs (target/debug/build/dome-cli/fa3dd338a15666ca/out/dome_cli-fa3dd338a15666ca)
+     Running unittests src/main.rs (target/debug/build/dome-cli/37a6b7942d0937a7/out/dome-37a6b7942d0937a7)
+     Running tests/cli.rs (target/debug/build/dome-cli/ed63f0e8486c1785/out/cli-ed63f0e8486c1785)
+     Running tests/error_messages.rs (target/debug/build/dome-cli/4882d2b6be0cafbc/out/error_messages-4882d2b6be0cafbc)
+     Running unittests src/lib.rs (target/debug/build/dome-config/b440a73a65615703/out/dome_config-b440a73a65615703)
+     Running tests/blueprint_toml.rs (target/debug/build/dome-config/c4c7b0ce510a8bc3/out/blueprint_toml-c4c7b0ce510a8bc3)
+     Running unittests src/lib.rs (target/debug/build/dome-core/77f2bf72a22b49e2/out/dome_core-77f2bf72a22b49e2)
+     Running tests/error_messages.rs (target/debug/build/dome-core/e201f8bdaf76a9db/out/error_messages-e201f8bdaf76a9db)
+     Running tests/resource_limits.rs (target/debug/build/dome-core/0a4c72a53dad361d/out/resource_limits-0a4c72a53dad361d)
+     Running unittests src/lib.rs (target/debug/build/dome-device/7b4f65e0da7ac16d/out/dome_device-7b4f65e0da7ac16d)
+     Running tests/candidate_classification.rs (target/debug/build/dome-device/5ba9d078df26b4b3/out/candidate_classification-5ba9d078df26b4b3)
+     Running unittests src/lib.rs (target/debug/build/dome-display/7ef92918e9e51e1a/out/dome_display-7ef92918e9e51e1a)
+     Running tests/display_aperture.rs (target/debug/build/dome-display/33ff8f4acf20ca08/out/display_aperture-33ff8f4acf20ca08)
+     Running unittests src/lib.rs (target/debug/build/dome-engine/e35154df70328e62/out/dome_engine-e35154df70328e62)
+     Running tests/launch_plan.rs (target/debug/build/dome-engine/f376aa8bc482b041/out/launch_plan-f376aa8bc482b041)
+     Running unittests src/lib.rs (target/debug/build/dome-guest-agent/3fb647f60828b89c/out/dome_guest_agent-3fb647f60828b89c)
+     Running tests/sentinel_contract.rs (target/debug/build/dome-guest-agent/3a09c541b0dfdd5f/out/sentinel_contract-3a09c541b0dfdd5f)
+     Running unittests src/lib.rs (target/debug/build/dome-host-linux/47c7add178c0aafc/out/dome_host_linux-47c7add178c0aafc)
+     Running tests/doctor_fixture.rs (target/debug/build/dome-host-linux/4841105f3835cde4/out/doctor_fixture-4841105f3835cde4)
+     Running unittests src/lib.rs (target/debug/build/dome-image/67b6c7139d756f76/out/dome_image-67b6c7139d756f76)
+     Running tests/foundation_manifest.rs (target/debug/build/dome-image/d75dea4c597bb970/out/foundation_manifest-d75dea4c597bb970)
+     Running unittests src/lib.rs (target/debug/build/dome-net/5b8cf1e1aeadcc4e/out/dome_net-5b8cf1e1aeadcc4e)
+     Running tests/perimeter_policy.rs (target/debug/build/dome-net/d4b9ac29831f3084/out/perimeter_policy-d4b9ac29831f3084)
+     Running unittests src/lib.rs (target/debug/build/dome-obfuscation/8e4dec2aae02451b/out/dome_obfuscation-8e4dec2aae02451b)
+     Running tests/obfstr.rs (target/debug/build/dome-obfuscation/abddfbf13c8fa7d2/out/obfstr-abddfbf13c8fa7d2)
+     Running unittests src/lib.rs (target/debug/build/dome-plugin/4db96cd2fb14cc8a/out/dome_plugin-4db96cd2fb14cc8a)
+     Running tests/plugin_contract.rs (target/debug/build/dome-plugin/12141cbeaa0ff08b/out/plugin_contract-12141cbeaa0ff08b)
+     Running unittests src/lib.rs (target/debug/build/dome-supervisor/3d121660fce01a35/out/dome_supervisor-3d121660fce01a35)
+     Running tests/chamber_record.rs (target/debug/build/dome-supervisor/9c05376aa38f5ee8/out/chamber_record-9c05376aa38f5ee8)
+
+EXIT: 0

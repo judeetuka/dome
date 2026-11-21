@@ -1,5 +1,23 @@
 use dome_core::{CellSpec, ChamberId};
 
+/// Errors raised while preparing or running a chamber on a platform engine.
+///
+/// `DeviceUnavailable` is kept distinct from the rest on purpose: a host without
+/// `/dev/kvm` is a capability gap (CLI exit 4), not an engine fault (exit 5).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EngineError {
+    #[error("hypervisor device unavailable: {0}")]
+    DeviceUnavailable(String),
+    #[error("engine setup failed: {0}")]
+    Setup(String),
+    #[error("guest memory allocation failed: {0}")]
+    Memory(String),
+    #[error("guest architecture {guest} is not supported by engine {engine}")]
+    UnsupportedGuestArch { engine: String, guest: String },
+    #[error("launch failed: {0}")]
+    Launch(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchPlan {
     chamber_id: ChamberId,

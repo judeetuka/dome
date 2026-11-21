@@ -169,6 +169,13 @@ generally — narrow that to foundations (see **T66**).
 ### 7. Build constraints for every task
 
 - All cargo invocations cap at `-j4` (per operating instructions). Never uncapped.
+- **The development sandbox has a read-only root filesystem.** `~/.cargo` cannot be written,
+  so new dependencies can only be resolved from what is already extracted in
+  `~/.cargo/registry/src`. Run cargo with `CARGO_NET_OFFLINE=true` and pin to the versions
+  already present. A dependency that is not cached cannot be added in this environment —
+  that is a hard limit, not a preference. Workaround: run cargo where `~/.cargo` is writable.
+- Only `toml 1.1.8` is available locally; the 0.8-vs-1.x question in section 2 is settled
+  by availability. T4 targets 1.x.
 - `cargo test --workspace` currently passes: 25 tests across 14 crates.
 - **Resolved**: every tracked file was mode `100755`, which made `git status` report
   the whole tree as modified with a zero-byte diff. `core.fileMode` is now `false` and
@@ -323,7 +330,7 @@ Wave M0.5 (unblocked, can overlap Wave 0):
 Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T1: CI pipeline (GitHub Actions) [DONE]
 ├── T2: tokio deferral decision — runtime lands in M4 [quick]
-├── T3: Error architecture (thiserror per crate) [quick]
+├── T3: Error architecture (thiserror per crate) [DONE]
 ├── T4: Serde + TOML parsing (dome-config read path) [unspecified-high]
 ├── T5: CLI migration to clap [unspecified-high]
 ├── T6: Blueprint validation rules [unspecified-high]
@@ -633,11 +640,23 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-plugin/src/lib.rs:278-287` — Current `Display` impl for `PluginError`
   - `crates/dome-cli/src/lib.rs:100-111` — Current `Display` impl for `CliError`
 
+  **Completed** (2026). Deviations from the spec above, all deliberate:
+
+  - `thiserror` was added to **five** crates, not three: `dome-config` and `dome-engine`
+    also gain error enums, so they need the derive too.
+  - `ConfigError::MissingField` takes `&'static str`, not `String`. The QA snippet showing
+    `MissingField("test".into())` will not compile against it; use `MissingField("cell.foundation")`.
+    A static field name avoids an allocation for a value that is always a literal.
+  - `EngineError::DeviceUnavailable` is a separate variant from `Setup`/`Launch` because a
+    missing `/dev/kvm` must map to CLI exit 4, not exit 5 (see `docs/cli-contract.md`).
+  - Error message text is **unchanged** and now pinned by two new test files:
+    `crates/dome-core/tests/error_messages.rs` and `crates/dome-cli/tests/error_messages.rs`.
+
   **Acceptance Criteria**:
-  - [ ] All existing tests pass unchanged
-  - [ ] `cargo clippy --workspace --all-targets -- -D warnings` passes
-  - [ ] New error enums have `#[derive(Error, Debug)]` with descriptive messages
-  - [ ] Error messages match the existing Display output exactly
+  - [x] All existing tests pass unchanged (25 -> 28, three added for message stability)
+  - [x] `cargo clippy --workspace --all-targets -- -D warnings` passes
+  - [x] New error enums have `#[derive(Error, Debug)]` with descriptive messages
+  - [x] Error messages match the existing Display output exactly
 
   **QA Scenarios**:
   ```
