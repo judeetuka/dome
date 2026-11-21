@@ -77,6 +77,28 @@ fn main() {
             );
             return;
         }
+        "netns" => {
+            // Enter a network namespace and raise loopback, then report the kernel's view.
+            if let Err(error) = dome_engine::sandbox::unshare_chamber_namespaces(false) {
+                println!("CAGE_FAILED: {error}");
+                std::process::exit(2);
+            }
+            if let Err(error) = dome_engine::sandbox::bring_up_loopback() {
+                println!("CAGE_FAILED: {error}");
+                std::process::exit(2);
+            }
+
+            let flags = std::fs::read_to_string("/sys/class/net/lo/flags")
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let value = u32::from_str_radix(flags.trim_start_matches("0x"), 16).unwrap_or(0);
+
+            println!("CAGE_APPLIED");
+            println!("lo_flags={flags}");
+            println!("lo_up={}", value & 0x1 != 0);
+            return;
+        }
         "boot" => {
             // Boot the real kernel inside the production cage. Runs here rather than in a
             // test because the cage is irreversible: doing it in the harness would poison

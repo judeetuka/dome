@@ -1,0 +1,15 @@
+# T23 — per-chamber network namespace (partial)
+# measured capabilities as uid 1000
+
+host netns creation (ip netns add):     DENIED  (mkdir /var/run/netns: Permission denied)
+veth in host namespace:                 DENIED  (RTNETLINK: Operation not permitted)
+inside user+net namespace:
+  loopback up:                          OK      (lo flags 0x9 -> UP|LOWER_UP, 127.0.0.1/8 assigned)
+  veth pair in own namespace:           OK
+
+# implemented this task
+sandbox::bring_up_loopback  -> called by apply_engine_cage before landlock and seccomp
+test loopback_is_up_inside_the_namespace ... ok
+
+# consequence
+chamber owns its netns; host port publishing needs a userspace forwarder -> T69

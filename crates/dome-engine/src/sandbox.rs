@@ -201,6 +201,57 @@ pub fn unshare_pid_namespace() -> Result<(), EngineError> {
     Ok(())
 }
 
+/// Raise the loopback interface inside the process's network namespace.
+///
+/// A fresh network namespace starts with `lo` present but DOWN and without an address, so a
+/// chamber that has just been namespaced cannot reach even 127.0.0.1. The kernel assigns
+/// 127.0.0.1/8 to `lo` when it comes up, so the interface flags are the whole job.
+///
+/// Measured: the address appears as soon as the interface is up, which is why this does not
+/// poke SIOCSIFADDR as well.
+pub fn bring_up_loopback() -> Result<(), EngineError> {
+    // SAFETY: all four calls operate on a local ifreq and a socket owned by this function,
+    // and every pointer passed is derived from a live local.
+    #[allow(unsafe_code)]
+    unsafe {
+        let socket = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
+        if socket < 0 {
+            return Err(EngineError::Setup(format!(
+                "cannot open a socket to configure loopback: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+
+        let mut request: libc::ifreq = std::mem::zeroed();
+        request.ifr_name[0] = b'l' as libc::c_char;
+        request.ifr_name[1] = b'o' as libc::c_char;
+
+        let get_result = libc::ioctl(socket, libc::SIOCGIFFLAGS as libc::c_ulong, &mut request);
+        if get_result < 0 {
+            let error = std::io::Error::last_os_error();
+            libc::close(socket);
+            return Err(EngineError::Setup(format!(
+                "cannot read loopback flags: {error}"
+            )));
+        }
+
+        // Bring the interface up; keep every existing flag.
+        request.ifr_ifru.ifru_flags |= libc::IFF_UP as libc::c_short;
+
+        let set_result = libc::ioctl(socket, libc::SIOCSIFFLAGS as libc::c_ulong, &request);
+        let error = std::io::Error::last_os_error();
+        libc::close(socket);
+
+        if set_result < 0 {
+            return Err(EngineError::Setup(format!(
+                "cannot bring loopback up: {error}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Map the current uid and gid into the new user namespace.
 fn map_identity(uid: u32, gid: u32) -> Result<(), EngineError> {
     // setgroups must be denied before gid_map can be written by an unprivileged process.
@@ -391,6 +442,9 @@ fn install_filter(denial: SeccompAction) -> Result<(), EngineError> {
 /// make that fail. M4 adds it around a fork using `unshare_pid_namespace`.
 pub fn apply_engine_cage(kernel: Option<&Path>) -> Result<LandlockEnforcement, EngineError> {
     unshare_chamber_namespaces(false)?;
+    // Loopback has to come up before the filter goes on: the ioctls it needs are allowed
+    // today only because they are in the baseline block, and relying on that would be luck.
+    bring_up_loopback()?;
     harden_engine_process()?;
     let enforcement = apply_landlock(&engine_readable_paths(kernel), &[])?;
     install_sigsys_reporter();

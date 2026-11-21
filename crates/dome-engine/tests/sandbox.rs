@@ -175,3 +175,14 @@ fn a_real_kernel_boots_inside_the_cage() {
         "our init did not run under the cage: {text}"
     );
 }
+
+#[test]
+fn loopback_is_up_inside_the_namespace() {
+    let output = probe("netns");
+    let text = text_of(&output);
+
+    assert!(output.status.success(), "probe failed: {text}");
+    // A namespaced process with lo down cannot reach even 127.0.0.1, which would make every
+    // in-chamber service unreachable for no visible reason.
+    assert!(text.contains("lo_up=true"), "loopback was left down: {text}");
+}
