@@ -1,0 +1,17 @@
+# T11 — .dome header layout
+# command: cargo test -p dome-image -j4
+
+test a_manifest_shorter_than_a_tag_is_rejected ... ok
+test a_truncated_header_is_rejected ... ok
+test an_unknown_format_byte_is_a_typed_error ... ok
+test an_unknown_version_is_rejected ... ok
+test body_length_matches_the_declared_layout ... ok
+test foundation_format_round_trips_through_its_wire_byte ... ok
+test header_round_trips ... ok
+test magic_is_at_the_front ... ok
+test the_layout_constants_agree_with_the_documented_sizes ... ok
+test wire_bytes_are_pinned_so_existing_files_keep_meaning ... ok
+test wrong_magic_is_rejected ... ok
+
+test result: ok. 11 passed; 0 failed
+workspace total: 146

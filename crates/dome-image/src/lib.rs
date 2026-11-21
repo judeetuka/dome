@@ -1,3 +1,6 @@
+pub mod format;
+pub mod header;
+
 use std::path::{Path, PathBuf};
 
 use dome_core::{FoundationName, StorageSize};

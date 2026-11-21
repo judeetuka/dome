@@ -32,7 +32,7 @@ verification is reproducible from a clean checkout.
 | --- | --- | --- |
 | Wave 0 + M1 (parsing, validation, CLI, CI) | T1, T3–T9 | **done** (8/8) |
 | Risk-death + decisions | T59–T62 | **done** (4/4) — spike, privilege ADR, CLI contract, hygiene |
-| **M2** format + crypto | T10–T14 | **1/5** — crypto done, `.dome` container pending |
+| **M2** format + crypto | T10–T14 | **2/5** — crypto + header layout done; writer/reader pending |
 | **M3** engine | T15–T21 | **DONE** (7/7) — real kernel boots in-engine, inside the cage |
 | M3 sign-off gate | T67 | **partial** — CPUID policy, DMA refusal, cage done; device-set pin, I/O rate limits, fuzz owed |
 | M4 chambers, cgroups, netns | T22–T28, T63–T64 | not started — ADR 0001 settled the privileges, T63 substrate is the entry point |
@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 135 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 146 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -392,7 +392,7 @@ Wave 0 (Kill the risk before building anything — 4 tasks, all parallel):
 ├── T59: KVM spike — KERNEL BOOTS on KVM, no QEMU [DONE]
 ├── T60: Privileges settled — ZERO privilege, see ADR 0001 [DONE]
 ├── T61: CLI contract doc — pins the command grammar [DONE]  ← gates T5, T29
-└── T62: Repo hygiene — remainder: LICENSE, assets/, evidence policy [quick]
+└── T62: Repo hygiene — LICENSE, assets/, evidence policy [DONE]
 
 Wave M0.5 (unblocked, can overlap Wave 0):
 └── T63: virtio device substrate — 16550 UART + initramfs boot path [deep]  ← GATES T19, T21, T36, T38
@@ -408,21 +408,21 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T8: dome-test-utils crate [DONE]
 └── T9: M1 integration tests + round-trip validation [DONE — M1 COMPLETE]
 
-Wave M2 (Dome Foundation Format — 5 tasks, 3 parallel):
-├── T10: dome-crypto crate (aws-lc-rs + age) [deep]
-├── T11: .dome format constants + header layout [unspecified-high]
+Wave M2 (Dome Foundation Format — 5 tasks, 3 parallel) — 2/5 done:
+├── T10: dome-crypto crate (aws-lc-rs + age) [DONE]
+├── T11: .dome format constants + header layout [DONE]
 ├── T12: .dome writer (manifest, chunks, signatures) [deep]
 ├── T13: .dome reader (parse, verify, decrypt) [deep]
 └── T14: M2 integration tests (round-trip, tamper, wrong key) [unspecified-high]
 
-Wave M3 (Linux Native Engine — 7 tasks, 4 parallel):
-├── T15: KVM dependencies + unsafe override [quick]
+Wave M3 (Linux Native Engine — 7 tasks) — COMPLETE:
+├── T15: KVM dependencies + unsafe override [DONE]
 ├── T16: LinuxEngine struct [DONE]
 ├── T17: Guest memory manager [DONE]
 ├── T18: Kernel loader (bzImage) [DONE]
-├── T19: VCPU lifecycle (create, init, run loop skeleton) [deep]
+├── T19: VCPU lifecycle (create, init, run loop) [DONE]
 ├── T20: Engine process sandbox [DONE]
-└── T21: M3 integration tests (capability, failure, minimal boot) [unspecified-high]
+└── T21: M3 integration tests (capability, failure, minimal boot) [DONE — M3 COMPLETE]
 
 Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
 ├── T22: cgroups v2 integration (per-chamber cgroup) [deep]
@@ -1212,24 +1212,38 @@ Max Concurrent: 6 (M1 wave)
   - [x] `sign_manifest` → `verify_manifest` verifies; tampering and wrong keys fail
   - [x] Every public function cites its primitive
 
-- [ ] 11. **.dome Binary Format Constants + Header Layout**
+- [x] 11. **.dome Binary Format Constants + Header Layout**
 
   **What to do**:
   - Define the `.dome` format specification in `dome-image/src/format.rs`:
     - Magic bytes: `DOME` (4 bytes, ASCII)
     - Format version: `u32` LE (starting at `1`)
-    - Header layout:
+    - Header layout. **Corrected**: the original sketch declared a `u8` occupying
+      `[12..16]` and then placed the nonce at `[16..28]`, which overlaps it. A one-byte field
+      cannot span four bytes, so the layout was unimplementable as written. This is the
+      fixed-width version that actually fits, with every offset derivable from the constants:
+
       ```
-      [0..4]   magic: "DOME"
-      [4..8]   version: u32 LE
-      [8..12]  manifest_length: u32 LE
-      [12..16] manifest_nonce_length: u8 (always 12 for AES-256-GCM)
-      [16..16+N] manifest_nonce: [u8; 12]
-      [16+N..16+N+M] manifest_ciphertext: [u8; manifest_length]
-      [after manifest] chunk_count: u32 LE
-      [per chunk] chunk_offset: u64 LE, chunk_length: u64 LE, chunk_nonce: [u8; 12], chunk_hash: [u8; 32]
-      [end] signature: [u8; 64] (Ed25519)
+      Header prefix (24 bytes, fixed):
+        [0..4]    magic            "DOME"
+        [4..8]    version          u32 LE, currently 1
+        [8..12]   manifest_length  u32 LE
+        [12..24]  manifest_nonce   [u8; 12]
+
+      Body:
+        [24 .. 24 + manifest_length]        manifest ciphertext (AES-256-GCM, tag included)
+        [..]                                chunk_count  u32 LE
+        [..]                                chunk table, chunk_count records of 60 bytes:
+                                              offset       u64 LE
+                                              length       u64 LE
+                                              nonce        [u8; 12]
+                                              plaintext_hash [u8; 32]  (SHA-256 of the chunk)
+        [..]                                signature [u8; 64] (Ed25519 over everything before it)
       ```
+
+      Deviation from the original sketch, recorded rather than silently "fixed": the nonce is
+      fixed-width and precedes the ciphertext, and there is no nonce-length byte. A future AEAD
+      with a different nonce size is a version bump, which is what `version` is for.
   - Add `FoundationFormat` serialization to/from bytes
   - Add `dome-image/src/header.rs` with `DomeHeader` struct with `parse()` and `write()` methods
   - Add tests in `dome-image/tests/header_parse.rs`
@@ -1251,28 +1265,40 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-image/src/lib.rs` — Existing `FoundationManifest`, `FoundationFormat`
   - `crates/dome-crypto/src/lib.rs` — `CryptoError` type
 
+  **Completed** (2026). Implementation is `crates/dome-image/src/format.rs` (constants and
+  wire encodings) and `crates/dome-image/src/header.rs` (`DomeHeader`), exercised by
+  `crates/dome-image/tests/header_parse.rs`. **Eleven tests.**
+
+  The layout sketch in this task was unimplementable as written and was corrected before any
+  code depended on it: it declared `manifest_nonce_length: u8` occupying `[12..16]` and then
+  placed the nonce at `[16..28]`, overlapping it. A one-byte field cannot span four bytes.
+  The implemented layout is fixed-width throughout, so every offset derives from a constant:
+
+  ```
+  Header prefix (24 bytes):
+    magic "DOME" | version u32 | manifest_length u32 | manifest_nonce [u8; 12]
+  Body:
+    manifest ciphertext [manifest_length] | chunk_count u32
+    chunk table: chunk_count x 60  (offset u64, length u64, nonce [u8; 12], hash [u8; 32])
+    signature [u8; 64]
+  ```
+
+  One check was written and then found to be dead: "manifest longer than a file could be"
+  computed `24 + u32::MAX > u32::MAX + 24`, which can never hold. It was replaced with a real
+  invariant — a manifest ciphertext always carries a GCM tag, so anything under 16 bytes is a
+  corrupt header.
+
+  `FoundationFormat` gained explicit wire bytes (1–4) rather than an `as u8` cast, with a test
+  pinning the numbers: reordering the enum must never reinterpret a file on disk.
+
   **Acceptance Criteria**:
-  - [ ] `DomeHeader::parse(valid_header_bytes)` returns correct header
-  - [ ] `DomeHeader::write()` produces bytes that parse back correctly
-  - [ ] Invalid magic bytes → parse error
-  - [ ] Unknown version → parse error
-  - [ ] Truncated header → parse error
-
-  **QA Scenarios**:
-
-  ```
-  Scenario: Header round-trip
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-image --test header_parse 2>&1
-      2. Assert: round-trip test passes
-    Expected Result: Write → Parse produces identical header
-    Evidence: evidence/task-11-header-roundtrip.txt
-  ```
-
-  **Commit**: NO (groups with T12, T13)
-
----
+  - [x] `DomeHeader::parse` returns the header that was written
+  - [x] `DomeHeader::write` produces bytes that parse back
+  - [x] Invalid magic is a typed `BadMagic` error
+  - [x] Unknown version is a typed `UnsupportedVersion` error
+  - [x] Truncated input is a typed `Truncated` error, tested at four lengths
+  - [x] `FoundationFormat` serialises to and from bytes, with pinned values
+  - [x] The layout constants are asserted against the documented sizes
 
 - [ ] 12. **.dome Writer (Manifest + Chunks + Signatures)**
 
@@ -1472,13 +1498,18 @@ Max Concurrent: 6 (M1 wave)
 
 - [x] 15. **KVM Dependencies + unsafe Override**
 
+  **Done** (2026). The correction below matters: an earlier revision claimed 0.18 did not
+  exist, because the crates.io index file was read with `tail -1` and it is chronological and
+  truncated. `cargo tree` is the authority; 0.18.0 exists and `linux-loader 0.14` requires it,
+  so pinning 0.17 alongside it produced two incompatible copies.
+
   **What to do**:
   - Add to `dome-engine/Cargo.toml`:
     ```toml
     [dependencies]
     kvm-bindings = "0.14"    # pin to whatever kvm-ioctls 0.25 requires; the two must match
     kvm-ioctls = "0.25"
-    vm-memory = { version = "0.17", features = ["backend-mmap"] }   # 0.18 does not exist
+    vm-memory = { version = "0.18", features = ["backend-mmap"] }   # 0.18 exists; see Revision 2 §3
     vmm-sys-util = "0.15"
     linux-loader = { version = "0.14", features = ["elf", "bzimage"] }
 
