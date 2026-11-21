@@ -1,0 +1,14 @@
+# T6 — every problem is reported at once
+# reports_every_problem_at_once builds a blueprint with five distinct faults and
+# asserts the validator returns all five, not just the first.
+
+test rejects_blocked_host_roots ... ok
+test rejects_memory_below_the_minimum ... ok
+test rejects_path_traversal ... ok
+test rejects_duplicate_published_ports ... ok
+test rejects_relative_aperture_paths ... ok
+test rejects_storage_below_the_minimum ... ok
+test reports_every_problem_at_once ... ok
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0

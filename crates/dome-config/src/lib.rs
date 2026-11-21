@@ -379,3 +379,133 @@ impl BlueprintFile {
         Ok(Blueprint::new(cell.with_apertures(apertures)))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Validation
+//
+// Rules come from .rules/project.md and .rules/security.md. Every rule is
+// evaluated so the caller sees ALL the problems at once instead of fixing them
+// one restart at a time.
+// ---------------------------------------------------------------------------
+
+/// Smallest guest memory a chamber may request. A Linux kernel will not boot
+/// comfortably below this.
+pub const MIN_MEMORY_MIB: u64 = 64;
+
+/// Smallest guest disk a chamber may request.
+pub const MIN_STORAGE_MIB: u64 = 128;
+
+/// Host paths that are never a valid aperture source unqualified.
+///
+/// `.rules/apertures.md` denies `/proc`, `/sys` and broad `/dev` by default: mapping
+/// any of them gives the chamber a view of kernel or device state rather than data.
+pub const BLOCKED_HOST_ROOTS: [&str; 3] = ["/proc", "/sys", "/dev"];
+
+/// Reason a host path cannot be used as an aperture source, if any.
+///
+/// This is a string-level check. Canonicalisation happens again at aperture setup
+/// time (T38) because symlinks can only be resolved against the live filesystem.
+fn blocked_host_reason(host_path: &str) -> Option<&'static str> {
+    if host_path.split('/').any(|segment| segment == "..") {
+        return Some("must not contain '..'; pass a canonical path");
+    }
+
+    for root in BLOCKED_HOST_ROOTS {
+        let blocked = host_path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+        if blocked {
+            return Some("is a blocked host path");
+        }
+    }
+
+    None
+}
+
+impl Blueprint {
+    /// Check this blueprint against the project's validation rules.
+    ///
+    /// Returns **every** problem found, not just the first. Costs nothing on the host:
+    /// validation is pure and needs neither KVM nor privileges.
+    ///
+    /// Two rules from the domain model cannot appear here because the types make them
+    /// unrepresentable: the foundation name is non-empty ([`FoundationName`]) and the
+    /// CPU count is at least one ([`CpuCount`]). Nor can `rate_limit_hz` be zero: it is a
+    /// `NonZeroU16` behind `GpioAperture`.
+    pub fn validate(&self) -> Result<(), Vec<ConfigError>> {
+        let cell = &self.cell;
+        let mut errors = Vec::new();
+
+        let limits = cell.limits();
+
+        if limits.memory().as_mib() < MIN_MEMORY_MIB {
+            errors.push(ConfigError::InvalidValue {
+                field: "limits.memory_mib",
+                reason: format!(
+                    "{} MiB is below the {MIN_MEMORY_MIB} MiB minimum",
+                    limits.memory().as_mib()
+                ),
+            });
+        }
+
+        if limits.storage().as_mib() < MIN_STORAGE_MIB {
+            errors.push(ConfigError::InvalidValue {
+                field: "limits.storage_mib",
+                reason: format!(
+                    "{} MiB is below the {MIN_STORAGE_MIB} MiB minimum",
+                    limits.storage().as_mib()
+                ),
+            });
+        }
+
+        // Publishing the same address/port/protocol twice cannot bind. The same port on
+        // a different protocol is legal, so the protocol is part of the key.
+        let mut seen: Vec<(PortProtocol, &str, u16)> = Vec::new();
+        for port in cell.ports() {
+            let key = (port.protocol(), port.host_addr(), port.host_port());
+            if seen.contains(&key) {
+                errors.push(ConfigError::InvalidValue {
+                    field: "perimeter.ports",
+                    reason: format!(
+                        "{} {}:{} is published twice",
+                        port.protocol().as_str(),
+                        port.host_addr(),
+                        port.host_port()
+                    ),
+                });
+            } else {
+                seen.push(key);
+            }
+        }
+
+        for aperture in cell.apertures().files() {
+            let host = aperture.host_path();
+
+            if !host.starts_with('/') {
+                errors.push(ConfigError::InvalidValue {
+                    field: "apertures.files.host",
+                    reason: format!("{host} must be an absolute path"),
+                });
+            } else if let Some(reason) = blocked_host_reason(host) {
+                errors.push(ConfigError::InvalidValue {
+                    field: "apertures.files.host",
+                    reason: format!("{host} {reason}"),
+                });
+            }
+
+            let guest = aperture.guest_path();
+            if !guest.starts_with('/') {
+                errors.push(ConfigError::InvalidValue {
+                    field: "apertures.files.guest",
+                    reason: format!("{guest} must be an absolute path"),
+                });
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}

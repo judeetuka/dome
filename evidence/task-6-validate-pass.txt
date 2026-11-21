@@ -1,0 +1,15 @@
+# T6 — validation accepts good blueprints
+# command: cargo test -p dome-config --test validation -j4
+
+accepts_the_shared_fixture      .. tests/fixtures/valid.cell.toml parses and validates
+accepts_a_minimal_chamber_at_the_boundaries .. exactly MIN_MEMORY_MIB / MIN_STORAGE_MIB is legal
+allows_the_same_port_on_different_protocols .. 53/tcp + 53/udp is legal
+accepts_paths_that_merely_start_with_a_blocked_root .. /procdata is not /proc
+
+test accepts_a_minimal_chamber_at_the_boundaries ... ok
+test accepts_paths_that_merely_start_with_a_blocked_root ... ok
+test allows_the_same_port_on_different_protocols ... ok
+test accepts_the_shared_fixture ... ok
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0

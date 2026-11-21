@@ -334,7 +334,7 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T3: Error architecture (thiserror per crate) [DONE]
 ├── T4: Serde + TOML parsing (dome-config read path) [DONE]
 ├── T5: CLI migration to clap [unspecified-high]
-├── T6: Blueprint validation rules [unspecified-high]
+├── T6: Blueprint validation rules [DONE]
 ├── T7: Wire dome-device into dome-host-linux [quick]
 ├── T8: dome-test-utils crate [quick]
 └── T9: M1 integration tests + round-trip validation [unspecified-high]
@@ -861,49 +861,32 @@ Max Concurrent: 6 (M1 wave)
   - `.rules/project.md:22-29` — "validate resource and port policies"
   - `.rules/apertures.md:15-19` — Blocked paths list
 
+  **Completed** (2026). `Blueprint::validate() -> Result<(), Vec<ConfigError>>`
+  returns **all** faults at once. Eleven tests in `crates/dome-config/tests/validation.rs`.
+
+  Decisions worth knowing:
+
+  - **Minimums live in `dome-config` as public constants** (`MIN_MEMORY_MIB = 64`,
+    `MIN_STORAGE_MIB = 128`), not as literals in the validator, so tests and the CLI error
+    message quote the same numbers.
+  - **Three of the spec's rules are unrepresentable and were not re-checked**: an empty
+    foundation name, a zero CPU count, and a zero `rate_limit_hz` are already rejected by
+    `FoundationName`, `CpuCount` and `NonZeroU16`. Re-validating them would be dead code.
+  - **Duplicate ports are keyed by protocol.** Port 53 on TCP *and* UDP is legal and
+    common; the same address/port/protocol twice is the failure. Stricter keying would
+    reject working DNS cells.
+  - **Blocked roots use segment matching, not `starts_with`.** `/procdata` is a legal path;
+    `/proc/self/environ` is not. A plain prefix check would have banned the first.
+  - **Path traversal is rejected at string level.** `/tmp/../proc/self` fails here, but only
+    canonicalisation against the live filesystem catches symlinks — that still has to
+    happen at aperture setup time (T38).
+
   **Acceptance Criteria**:
-  - [ ] `Blueprint::validate()` returns `Ok(())` for a valid blueprint
-  - [ ] `Blueprint::validate()` returns `Err(Vec<ConfigError>)` with ALL errors for invalid blueprint
-  - [ ] Test: valid blueprint → `validate()` returns Ok
-  - [ ] Test: blueprint with zero memory → `validate()` returns error mentioning memory
-  - [ ] Test: blueprint with duplicate host ports → `validate()` returns error mentioning port conflict
-  - [ ] Test: 3 simultaneous errors → all 3 appear in error output
-
-  **QA Scenarios**:
-  ```
-  Scenario: Validate a correct cell blueprint
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-config --test blueprint_toml -- validate_passes 2>&1
-      2. Assert: test passes
-    Expected Result: Valid blueprint passes validation
-    Evidence: evidence/task-6-validate-pass.txt
-
-  Scenario: Validate catches multiple errors
-    Tool: Bash
-    Steps:
-      1. Create a TOML with: memory=0, duplicate port 8080, /proc aperture
-      2. Parse and validate
-      3. Assert: returns Err with 3+ error entries
-      4. Assert: errors mention "memory", "port", "blocked path"
-    Expected Result: All errors reported simultaneously
-    Evidence: evidence/task-6-validate-multi-error.txt
-
-  Scenario: CLI validate command works
-    Tool: interactive_bash (tmux)
-    Steps:
-      1. Run: cargo run -p dome-cli -- validate fixtures/valid.cell.toml
-      2. Assert: output contains "valid" or "ok" (success message)
-      3. Assert: exit code is 0
-    Expected Result: CLI validation works end-to-end
-    Evidence: evidence/task-6-cli-validate.txt
-  ```
-
-  **Commit**: NO (groups with T5)
-  - Message: `feat(m1): add blueprint validation rules and CLI validate command`
-
----
-
+  - [x] `Blueprint::validate()` implemented, returning every error not just the first
+  - [x] Memory >= 64 MiB and storage >= 128 MiB enforced, boundaries tested on both sides
+  - [x] Duplicate host ports rejected; same port on different protocols allowed
+  - [x] Aperture host/guest paths must be absolute; `/proc`, `/sys` and `/dev` blocked
+  - [x] `dome validate` CLI wiring deferred to T5, which owns the command surface
 - [ ] 7. **Wire dome-device into dome-host-linux**
 
   **What to do**:
