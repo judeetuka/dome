@@ -20,7 +20,9 @@ pub enum EngineError {
     IoMmuUnavailable(String),
 }
 
+pub mod boot;
 pub mod cpuid;
+pub mod launch;
 pub mod loader;
 pub mod memory;
 pub mod sandbox;

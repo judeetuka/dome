@@ -1,0 +1,18 @@
+# T21 — M3 integration: real kernel booted through the engine
+# command: cargo run -p dome-engine --example boot_probe -- --initrd
+
+elapsed 20.09s, exits 37766, stopped false, timed_out true
+--- console (12852 bytes) ---
+[    0.000000] Linux version 6.12.115-0-virt (buildozer@build-3-21-x86_64) ...
+[    0.000000] Command line: console=ttyS0 earlyprintk=ttyS0 panic=1
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009efff] usable
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001fffffff] usable
+[    0.000000] Hypervisor detected: KVM
+[    0.040702] RAMDISK: [mem 0x10000000-0x10058fff]
+[    0.098007] Unpacking initramfs...
+[    0.860080] Freeing unused kernel image (initmem) memory: 2808K
+[    0.863491] Run /init as init process
+dome-init: direct serial write from userspace
+[    0.865149] reboot: Power off not available: System halted instead
+--- end ---
