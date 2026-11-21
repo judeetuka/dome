@@ -1,5 +1,7 @@
 pub mod cgroup;
+pub mod frame;
 pub mod network;
+pub mod relay;
 
 use dome_core::ChamberId;
 

@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 172 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 195 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -2058,7 +2058,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 23. **Network Namespace Integration (per-chamber netns)**
+- [x] 23. **Network Namespace Integration (per-chamber netns)**
 
   **What to do**:
   - Add `netns-rs = "0.2"` and `rtnetlink = "0.21"` to `dome-supervisor/Cargo.toml`
@@ -2103,6 +2103,35 @@ Max Concurrent: 6 (M1 wave)
   > host port must hand connections to a forwarder inside the chamber's namespace over a
   > socketpair created before `unshare`, since nothing may `setns` in. That finishes
   > `publish_port` and therefore T23.
+
+  > **Done** (2026), though not the way the task assumed. The byte relay is
+  > `crates/dome-supervisor/src/relay.rs` with the protocol in `frame.rs`; **17 tests**.
+  >
+  > **Measured first.** As uid 1000: `ip netns add` fails, a host-namespace veth fails with
+  > EPERM, and `setns` into another user's namespace is refused. So "veth in the host
+  > namespace plus nftables" is unreachable, and **the chamber owns its namespace while the
+  > supervisor cannot enter it.**
+  >
+  > What that leaves, and what was built: a socketpair created before `unshare`, with
+  > connections multiplexed over it. The supervisor binds the host port and forwards; the
+  > chamber side dials `127.0.0.1:guest_port` from inside its own namespace, which is the
+  > only place that dial is legal.
+  >
+  > **The bug that mattered:** the chamber dials asynchronously, so a data frame could arrive
+  > before the connection existed and was silently dropped — small payloads vanished while
+  > large ones got lucky. Two tests failed and exposed it. The fix is that a connection owns
+  > its queue from the moment it is announced, and a writer thread applies that queue in
+  > order; the queue is handed to the dial thread rather than drained. That is the difference
+  > between "usually works" and correct.
+  >
+  > Also here: frame lengths are checked **before** allocation so a hostile header cannot
+  > decide how much memory the process commits; an unknown tag is an error rather than being
+  > ignored; a port with nothing behind it closes instead of hanging.
+  >
+  > **What is not here:** the wiring into a real chamber launch. That means passing one end of
+  > the socketpair across `unshare` into the engine process, and it belongs to **T24**, which
+  > is the component that constructs a chamber. T23's mechanism is complete and tested
+  > in-process; T24 is where it gets plugged into a live launch.
 
   **Acceptance Criteria**:
   - [ ] Network namespace created with correct name

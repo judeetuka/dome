@@ -1,0 +1,22 @@
+# T23 — perimeter relay
+# command: cargo test -p dome-supervisor -j4
+
+frame codec:
+  every_frame_kind_round_trips ... ok
+  an_oversized_length_is_refused_before_allocating ... ok
+  an_unknown_tag_is_malformed_rather_than_ignored ... ok
+  a_truncated_frame_is_reported ... ok
+
+relay end to end:
+  a_byte_travels_host_to_chamber_and_back ... ok
+  a_larger_payload_survives_the_frame_boundary ... ok
+  several_connections_are_multiplexed ... ok
+  a_port_nothing_listens_on_closes_rather_than_hanging ... ok
+
+# the failure that found a real bug:
+#   first run: a_byte_travels_host_to_chamber_and_back FAILED (empty echo),
+#              several_connections_are_multiplexed FAILED on connection 6
+#   cause: chamber dials asynchronously, so DATA arriving before the dial hit an empty table
+#          and was dropped
+#   fix:   a connection owns its queue from announcement; the queue is handed to the dial
+#          thread, not drained

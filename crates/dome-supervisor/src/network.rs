@@ -41,17 +41,13 @@ impl ChamberNetwork {
             // supervisor does not have. Failing here explains why, later it would look like
             // a mystery bind error.
             if host_port < FIRST_UNPRIVILEGED_PORT {
-                return Err(SupervisorError::PrivilegedPort {
-                    port: host_port,
-                });
+                return Err(SupervisorError::PrivilegedPort { port: host_port });
             }
 
             // The relay carries TCP. Accepting UDP and silently dropping it would be worse
             // than refusing.
             if port.protocol() != PortProtocol::Tcp {
-                return Err(SupervisorError::UnsupportedProtocol {
-                    protocol: "udp",
-                });
+                return Err(SupervisorError::UnsupportedProtocol { protocol: "udp" });
             }
 
             let key = (port.host_addr().to_owned(), host_port, port.protocol());
@@ -89,7 +85,10 @@ impl ChamberNetwork {
 
     /// Path to a process's network namespace, for identity checks.
     pub fn netns_link(pid: u32) -> PathBuf {
-        Path::new("/proc").join(pid.to_string()).join("ns").join("net")
+        Path::new("/proc")
+            .join(pid.to_string())
+            .join("ns")
+            .join("net")
     }
 
     /// Kernel inode identifying the network namespace a process is in.
@@ -115,10 +114,9 @@ impl ChamberNetwork {
             })?
             .to_owned();
 
-        digits.parse::<u64>().map_err(|_| SupervisorError::UnexpectedNetns {
-            pid,
-            value: digits,
-        })
+        digits
+            .parse::<u64>()
+            .map_err(|_| SupervisorError::UnexpectedNetns { pid, value: digits })
     }
 
     /// Whether the namespace still exists for a live process.

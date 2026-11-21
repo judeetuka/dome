@@ -47,7 +47,9 @@ pub enum SupervisorError {
     InvalidChamberId(String),
 
     /// A published port sits below the privileged boundary.
-    #[error("cannot publish port {port}: ports below 1024 need privilege a chamber supervisor does not have")]
+    #[error(
+        "cannot publish port {port}: ports below 1024 need privilege a chamber supervisor does not have"
+    )]
     PrivilegedPort {
         /// Port that was requested.
         port: u16,
@@ -67,6 +69,15 @@ pub enum SupervisorError {
         address: String,
         /// Port that collided.
         port: u16,
+    },
+
+    /// A host port could not be bound.
+    #[error("cannot bind port {port}: {reason}")]
+    Bind {
+        /// Port that failed.
+        port: u16,
+        /// Why it failed.
+        reason: String,
     },
 
     /// A namespace link did not have the expected shape.
@@ -174,7 +185,9 @@ impl ChamberCgroup {
 pub fn delegated_root() -> Result<PathBuf, SupervisorError> {
     let hierarchy = Path::new("/sys/fs/cgroup");
     if !hierarchy.is_dir() {
-        return Err(SupervisorError::CgroupUnavailable("/sys/fs/cgroup is missing".to_owned()));
+        return Err(SupervisorError::CgroupUnavailable(
+            "/sys/fs/cgroup is missing".to_owned(),
+        ));
     }
 
     let contents = fs::read_to_string("/proc/self/cgroup").map_err(|error| {
@@ -188,11 +201,17 @@ pub fn delegated_root() -> Result<PathBuf, SupervisorError> {
             SupervisorError::CgroupUnavailable("no cgroups v2 unified entry".to_owned())
         })?;
 
-    let mut components: Vec<&str> = relative.split('/').filter(|part| !part.is_empty()).collect();
+    let mut components: Vec<&str> = relative
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
 
     // Prefer the deepest .service ancestor: that is the delegated unit. Otherwise step up
     // one level, because a process cannot create siblings inside its own leaf cgroup.
-    match components.iter().rposition(|part| part.ends_with(".service")) {
+    match components
+        .iter()
+        .rposition(|part| part.ends_with(".service"))
+    {
         Some(index) => components.truncate(index + 1),
         None => {
             components.pop();
@@ -205,7 +224,9 @@ pub fn delegated_root() -> Result<PathBuf, SupervisorError> {
         ));
     }
 
-    let root = components.iter().fold(hierarchy.to_path_buf(), |path, part| path.join(part));
+    let root = components
+        .iter()
+        .fold(hierarchy.to_path_buf(), |path, part| path.join(part));
 
     if !root.is_dir() {
         return Err(SupervisorError::NotDelegated(format!(

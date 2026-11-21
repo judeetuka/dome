@@ -11,7 +11,8 @@ fn chamber(name: &str) -> ChamberId {
 
 #[test]
 fn an_isolated_chamber_publishes_nothing_and_reaches_nothing() {
-    let network = ChamberNetwork::plan(&chamber("quiet"), PerimeterPolicy::isolated()).expect("plan");
+    let network =
+        ChamberNetwork::plan(&chamber("quiet"), PerimeterPolicy::isolated()).expect("plan");
 
     assert!(network.is_isolated());
     assert!(network.published().is_empty());
@@ -111,7 +112,9 @@ fn inspecting_a_process_that_does_not_exist_is_a_typed_error() {
 #[test]
 fn a_hostile_chamber_id_cannot_shape_a_namespace_name() {
     for hostile in ["../escape", "with space", "a/b"] {
-        let Ok(id) = ChamberId::new(hostile) else { continue };
+        let Ok(id) = ChamberId::new(hostile) else {
+            continue;
+        };
         match ChamberNetwork::plan(&id, PerimeterPolicy::isolated()) {
             Err(SupervisorError::InvalidChamberId(_)) => {}
             other => panic!("{hostile:?} was accepted: {other:?}"),

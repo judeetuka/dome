@@ -52,9 +52,14 @@ fn the_delegated_root_is_inside_the_cgroup_hierarchy() {
 
 #[test]
 fn limits_are_written_to_the_kernel() {
-    let Some(cgroup) = try_create("test-limits") else { return };
+    let Some(cgroup) = try_create("test-limits") else {
+        return;
+    };
 
-    assert_eq!(cgroup.read("memory.max").expect("memory.max"), (64 * 1024 * 1024u64).to_string());
+    assert_eq!(
+        cgroup.read("memory.max").expect("memory.max"),
+        (64 * 1024 * 1024u64).to_string()
+    );
     assert_eq!(cgroup.read("cpu.max").expect("cpu.max"), "100000 100000");
     assert_eq!(cgroup.read("pids.max").expect("pids.max"), "64");
 
@@ -86,7 +91,9 @@ fn more_cpus_raise_both_the_cpu_and_process_limits() {
 
 #[test]
 fn a_process_can_be_attached() {
-    let Some(cgroup) = try_create("test-attach") else { return };
+    let Some(cgroup) = try_create("test-attach") else {
+        return;
+    };
 
     let mut child = std::process::Command::new("sleep")
         .arg("30")
@@ -98,7 +105,9 @@ fn a_process_can_be_attached() {
 
     let members = cgroup.read("cgroup.procs").expect("cgroup.procs");
     assert!(
-        members.split_whitespace().any(|entry| entry == pid.to_string()),
+        members
+            .split_whitespace()
+            .any(|entry| entry == pid.to_string()),
         "pid {pid} not in cgroup.procs: {members:?}"
     );
 
@@ -109,12 +118,20 @@ fn a_process_can_be_attached() {
 
 #[test]
 fn destroy_removes_the_directory() {
-    let Some(cgroup) = try_create("test-destroy") else { return };
+    let Some(cgroup) = try_create("test-destroy") else {
+        return;
+    };
     let path = cgroup.path().to_path_buf();
 
-    assert!(path.is_dir(), "cgroup directory should exist before destroy");
+    assert!(
+        path.is_dir(),
+        "cgroup directory should exist before destroy"
+    );
     cgroup.destroy().expect("destroy");
-    assert!(!path.exists(), "cgroup directory should be gone after destroy");
+    assert!(
+        !path.exists(),
+        "cgroup directory should be gone after destroy"
+    );
 }
 
 #[test]
@@ -133,7 +150,10 @@ fn an_unsafe_chamber_id_is_refused() {
             Ok(cgroup) => {
                 let path = cgroup.path().to_path_buf();
                 let _ = cgroup.destroy();
-                panic!("{hostile:?} was accepted as a cgroup name: {}", path.display());
+                panic!(
+                    "{hostile:?} was accepted as a cgroup name: {}",
+                    path.display()
+                );
             }
         }
     }
