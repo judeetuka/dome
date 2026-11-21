@@ -1,0 +1,32 @@
+# T63 - device model, tested without a hypervisor
+# command: cargo test -p dome-engine --test devices -j4
+
+test the_cli_offers_the_release_commands ... ok
+test a_missing_foundation_names_what_is_expected ... ok
+test the_cell_supplies_the_kernel_when_none_is_given ... ok
+test a_sealed_release_is_produced_here_but_cannot_run_here ... ok
+test a_release_needs_no_kernel_argument_when_the_foundation_is_installed ... ok
+test a_release_is_portable_by_default_and_runs_here ... ok
+test a_flipped_bit_fails_authentication ... ok
+test a_malformed_signature_is_rejected_without_panicking ... ok
+test the_wrapped_blob_does_not_contain_the_key ... ok
+test a_different_identity_cannot_unwrap ... ok
+test a_wrapped_key_round_trips_through_the_hybrid ... ok
+test a_truncated_blob_is_a_typed_error ... ok
+test the_status_handshake_reaches_driving ... ok
+test a_doorbell_reaches_the_backend_and_raises_an_interrupt ... ok
+test the_transport_identifies_itself ... ok
+test the_driver_may_only_accept_offered_features ... ok
+test the_device_set_routes_by_window ... ok
+test the_upper_feature_word_is_addressed_separately ... ok
+test the_uart_captures_what_the_guest_writes ... ok
+test reading_a_descriptor_past_the_end_of_guest_memory_is_an_error ... ok
+
+# real boot through the UART, from cargo test -p dome-engine --test launch:
+test boots_a_real_kernel_and_reports_its_memory_map ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 10.09s
+
+# measured sizes on this host:
+#   vmlinuz-virt        11.7 MB
+#   initramfs.cpio.gz  356 KB
+#   bootable base      ~12 MB  vs  postgres:16-alpine 420 MB

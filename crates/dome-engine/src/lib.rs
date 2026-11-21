@@ -22,6 +22,7 @@ pub enum EngineError {
 
 pub mod boot;
 pub mod cpuid;
+pub mod devices;
 pub mod launch;
 pub mod loader;
 pub mod memory;

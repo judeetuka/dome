@@ -80,25 +80,24 @@ pub struct VcpuSnapshot {
     pub ss: u16,
 }
 
-/// A 16550 UART that captures what the guest writes.
+/// The console, reached through port IO.
 ///
-/// The status registers matter more than the data register: a guest that polls the line
-/// status register and never sees 'transmitter empty' silently discards every character.
-/// That was measured in the spike and is why this device reports readiness.
+/// A thin adapter over [crate::devices::uart16550::Uart16550]: the register behaviour lives in
+/// one place so the port path and the memory-mapped path cannot drift apart.
 #[derive(Debug, Default)]
 pub struct SerialDevice {
-    output: Vec<u8>,
+    uart: crate::devices::uart16550::Uart16550,
 }
 
 impl SerialDevice {
     /// Bytes the guest has written so far.
     pub fn output(&self) -> &[u8] {
-        &self.output
+        self.uart.output()
     }
 
     /// Captured output as text, lossily.
     pub fn text(&self) -> String {
-        String::from_utf8_lossy(&self.output).into_owned()
+        self.uart.text()
     }
 }
 
@@ -106,15 +105,9 @@ impl VcpuIo for SerialDevice {
     fn io_in(&mut self, port: u16, data: &mut [u8]) {
         data.fill(0);
 
-        let value = match port {
-            // Line status: transmitter holding register empty + transmitter empty.
-            0x3FD => 0x60,
-            // Interrupt identification: no interrupt pending.
-            0x3FA => 0x01,
-            // Modem status: CTS, DSR, DCD asserted.
-            0x3FE => 0xB0,
-            _ => 0x00,
-        };
+        // Ports are the UART's base plus an offset, which is exactly how the register file is
+        // addressed by the memory-mapped path.
+        let value = self.uart.read_port(port.wrapping_sub(SERIAL_PORT));
 
         if let Some(first) = data.first_mut() {
             *first = value;
@@ -122,8 +115,8 @@ impl VcpuIo for SerialDevice {
     }
 
     fn io_out(&mut self, port: u16, data: &[u8]) {
-        if port == SERIAL_PORT {
-            self.output.extend_from_slice(data);
+        for byte in data {
+            self.uart.write_port(port.wrapping_sub(SERIAL_PORT), *byte);
         }
     }
 }
