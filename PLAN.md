@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 233 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 240 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -2406,6 +2406,28 @@ Max Concurrent: 6 (M1 wave)
   **Recommended Agent Profile**: `unspecified-high`
   **Parallelization**: Can Run In Parallel YES with T26 | Blocks: T28 | Blocked By: T25
   **References**: `crates/dome-image/src/writer.rs` — DomeWriter for packaging
+
+  > **STATUS: the package format is done; the CLI commands are owed.**
+  >
+  > Done: `crates/dome-image/src/export.rs` and the shared `bundle.rs` it was extracted from,
+  > with **seven tests**. An export carries the cell blueprint, the foundation name, the
+  > chamber's seal as a complete nested container, the console log and a layout version, all
+  > inside one signed and encrypted suite-2 container.
+  >
+  > The seal travels as an opaque nested container rather than flattened in, so it can still be
+  > opened on its own and its own signature still means something.
+  >
+  > **Sanitisation is enforced, not documented.** `Export::new` refuses a blueprint or a log
+  > containing a host path, and `write_export` rewrites the container manifest with a portable
+  > base name so the local foundation path cannot travel. A test writes a manifest pointing at
+  > `/home/iam/foundations/...` and asserts the resulting bytes do not contain `/home/iam`.
+  > The check is deliberately narrow: `/bin/sh` and `/etc/hosts` are ordinary container
+  > paths, not host identifiers, and a test pins that they are allowed.
+  >
+  > **Owed:** `dome export` / `dome import`. They need key handling — a file key to encrypt
+  > with and both signing keys — and that does not exist in the CLI yet. Landing them with T28,
+  > together with `dome seal`, is the point at which the CLI can do the whole cycle with one
+  > key story rather than two.
 
   **Acceptance Criteria**:
   - [ ] `export()` produces valid .dome export file

@@ -1,0 +1,12 @@
+# T27 — export package format (CLI owed)
+# command: cargo test -p dome-image --test export -j4
+
+test an_export_round_trips ... ok
+test a_seal_travels_inside_an_export_unchanged ... ok
+test a_host_path_in_the_blueprint_is_refused ... ok
+test a_host_path_in_the_logs_is_refused ... ok
+test the_local_foundation_path_does_not_travel ... ok
+test an_unknown_export_format_is_refused ... ok
+test ordinary_container_paths_are_not_mistaken_for_host_paths ... ok
+
+test result: ok. 7 passed; 0 failed

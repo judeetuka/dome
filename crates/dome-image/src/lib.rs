@@ -1,3 +1,5 @@
+pub mod bundle;
+pub mod export;
 pub mod format;
 pub mod header;
 pub mod image_error;
