@@ -2541,6 +2541,11 @@ Max Concurrent: 6 (M1 wave)
 
   **Guardrail**: This is a shell script orchestrating existing Buildroot tooling. NOT a custom build system.
 
+  > The design question "do we need an OS, or just the pieces?" is answered in
+  > [`docs/foundations.md`](docs/foundations.md): a foundation is a kernel plus a root filesystem,
+  > nothing about it requires a distribution. This recipe is the "pieces" answer — musl, busybox
+  > and whatever else you name, with no package manager on the device.
+
   **Must NOT do**:
   - Do not implement a custom build system
   - Do not bundle Buildroot source (document it as a prerequisite)
@@ -2579,6 +2584,10 @@ Max Concurrent: 6 (M1 wave)
     - Target: ~200 MiB, suitable for development chambers
   - Document Alpine version and `apk` prerequisites
   - Kernel profile fragment for developer use (debug symbols, KASAN, lockdep)
+
+  > Alpine is one recipe, not a dependency of the design. It exists because compiling needs a
+  > compiler and a package manager, which is most of what a distribution is for; the minimal
+  > recipe covers everything that does not need that.
 
   **Must NOT do**:
   - Do not implement Alpine package management — use `apk` directly
@@ -3990,6 +3999,33 @@ Max Concurrent: 6 (M1 wave)
   - [x] A corrupt record does not hide the valid ones
   - [x] Reconciliation resumes what was running and nothing else
   - [x] The record cannot escape its directory
+
+---
+
+- [ ] 70. **Shared Volumes (read-only by default, writable by declaration)**
+
+  > Design recorded in [`docs/adr/0005-shared-filesystems.md`](docs/adr/0005-shared-filesystems.md).
+  > Deliberately outside T63, whose device list excludes virtio-fs so the first device set stays
+  > three devices.
+
+  **What to do**:
+  - Add virtio-fs (or 9p as the fallback) behind the `VirtioBackend` trait from T63
+  - One host-side server per mount, shared by every chamber that mounts it, so cache
+    coherence is by construction rather than by hope
+  - Read-only mounts need only a cell declaration and work immediately
+  - A writable mount requires an explicit opt-in, is recorded in the chamber record, and is
+    reported by `dome ps` as a merged trust domain
+  - Refuse an implicit share: no path is shared because two cells happen to name it
+
+  **Must NOT do**:
+  - Do not make a writable share the quiet default, which is the Docker flaw recorded in the ADR
+  - Do not present a shared mount as isolation: it is the opposite, and the docs say so
+
+  **Acceptance Criteria**:
+  - [ ] Two chambers read one shared directory without ceremony
+  - [ ] A writable share requires an explicit declaration and is visible afterwards
+  - [ ] A chamber cannot write a read-only share
+  - [ ] Deleting one chamber leaves the share untouched
 
 ---
 
