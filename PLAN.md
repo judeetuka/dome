@@ -4063,8 +4063,23 @@ Max Concurrent: 6 (M1 wave)
   - `pacstrap` populates an arbitrary root using the host's package manager, which confirms a
     builder needs no pre-existing system to install into.
 
+  **Revised after the requirement.** Three further decisions, all now modelled:
+
+  1. **No distribution kernel.** The 151.5 MiB Arch `linux` package was measured only to show what
+     is being avoided; Dome builds its own 11.7 MB kernel from a profile with the devices the
+     engine exposes compiled in, and therefore no modules.
+  2. **A build stage that never ships.** `[build] packages` and `[build] artifacts`: the release
+     is assembled from the runtime closure and the copied artifacts alone, so a toolchain cannot
+     survive by accident. There is no "remove it afterwards and hope the dependencies went too".
+  3. **The package manager is opt-in and absent by default.** The builder fetches packages on the
+     host, so the image contains nothing installable unless `package_manager = "apk"` or
+     `"pacman"` asks for it.
+
   **Acceptance Criteria**:
   - [x] A recipe with no packages is valid and plans kernel-plus-init only
+  - [x] Build packages never appear in the release closure
+  - [x] Artifacts are copied in and reported
+  - [x] No package manager unless asked for; asking is recorded in the plan
   - [x] Every init choice parses and yields the right kernel command line
   - [x] An unknown init, unknown architecture, duplicate package or relative init path is refused
   - [x] The plan reports measured costs for the service manager and for dynamic linking

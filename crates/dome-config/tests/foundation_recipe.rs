@@ -146,3 +146,133 @@ fn a_relative_init_path_is_refused() {
         "{error:?}"
     );
 }
+
+// --- the build stage never reaches the release ---
+
+const TWO_STAGE: &str = "[foundation]\nname = \"app\"\ninit = \"sentinel\"\npackages = [\"fish\"]\n\n[build]\npackages = [\"rust\", \"gcc\", \"git\"]\nartifacts = [\"/build/target/release/app\"]\n";
+
+#[test]
+fn build_packages_are_not_part_of_the_release() {
+    let recipe = Recipe::from_toml(TWO_STAGE).expect("recipe");
+    let plan = recipe.plan();
+
+    assert_eq!(plan.build_packages, vec!["rust", "gcc", "git"]);
+    for tool in ["rust", "gcc", "git"] {
+        assert!(
+            !plan.runtime_packages.iter().any(|package| package == tool),
+            "{tool} must not reach the release: {:?}",
+            plan.runtime_packages
+        );
+    }
+
+    assert_eq!(plan.runtime_packages, vec!["fish".to_owned()]);
+}
+
+#[test]
+fn artifacts_are_copied_into_the_release() {
+    let recipe = Recipe::from_toml(TWO_STAGE).expect("recipe");
+    let plan = recipe.plan();
+
+    assert_eq!(plan.artifacts, vec!["/build/target/release/app".to_owned()]);
+    assert!(
+        plan.notes.iter().any(|note| note.contains("artifact")),
+        "the copy must be reported: {:?}",
+        plan.notes
+    );
+}
+
+#[test]
+fn a_package_in_both_stages_is_refused() {
+    let error = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\npackages = [\"fish\"]\n\n[build]\npackages = [\"fish\"]\n",
+    )
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("both a runtime and a build package"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_relative_artifact_path_is_refused() {
+    let error =
+        Recipe::from_toml("[foundation]\nname = \"app\"\n\n[build]\nartifacts = [\"app\"]\n")
+            .unwrap_err();
+
+    assert!(error.to_string().contains("absolute"), "{error}");
+}
+
+// --- the kernel and the package manager ---
+
+#[test]
+fn the_kernel_is_dome_own_build_by_default() {
+    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n").expect("recipe");
+
+    assert_eq!(recipe.kernel, "dome-minimal");
+    assert!(
+        recipe
+            .plan()
+            .notes
+            .iter()
+            .any(|note| note.contains("not a distribution package")),
+        "no distribution kernel must be claimed"
+    );
+}
+
+#[test]
+fn no_package_manager_is_the_default() {
+    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n").expect("recipe");
+    let plan = recipe.plan();
+
+    assert!(
+        !plan.image_has_package_manager,
+        "nothing to install anything with"
+    );
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("no package manager")),
+        "{:?}",
+        plan.notes
+    );
+}
+
+#[test]
+fn a_package_manager_can_be_asked_for() {
+    for (name, package) in [("apk", "apk-tools"), ("pacman", "pacman")] {
+        let input = format!("[foundation]\nname = \"app\"\npackage_manager = \"{name}\"\n");
+        let recipe = Recipe::from_toml(&input).expect(name);
+        let plan = recipe.plan();
+
+        assert!(plan.image_has_package_manager);
+        assert!(
+            plan.runtime_packages.contains(&package.to_owned()),
+            "{plan:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unknown_package_manager_is_refused() {
+    let error =
+        Recipe::from_toml("[foundation]\nname = \"app\"\npackage_manager = \"dnf\"\n").unwrap_err();
+    assert!(matches!(error, ConfigError::Unknown { .. }), "{error:?}");
+}
+
+#[test]
+fn a_truly_empty_recipe_is_a_kernel_and_an_init() {
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\nstatic_linking = true\n",
+    )
+    .expect("recipe");
+    let plan = recipe.plan();
+
+    assert!(plan.runtime_packages.is_empty());
+    assert!(plan.build_packages.is_empty());
+    assert!(plan.artifacts.is_empty());
+    assert!(plan.rootfs_is_empty, "nothing but the init");
+    assert!(!plan.image_has_package_manager);
+}

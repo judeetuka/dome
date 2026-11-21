@@ -77,7 +77,7 @@ Measured on an Arch host, because these numbers decide the design:
 | glibc | **50.7 MiB** |
 | systemd (+ libs, dbus) | **45.5 MiB** |
 | bash | 9.6 MiB |
-| Arch `linux` package (kernel + modules) | 151.5 MiB |
+| Arch `linux` package (kernel + modules) | 151.5 MiB — **not used** |
 | Dome kernel image (bzImage) | 11.7 MB |
 
 The first row is the one that matters most. **Any dynamically linked binary drags in glibc**, so
@@ -99,22 +99,68 @@ official Arch repositories** (checked with `pacman -Si` on this host). Choosing 
 or building it, which the builder must be able to do. systemd is in every repository and costs
 about 45 MiB.
 
-### The recipe
+### Our own kernel, never a distribution kernel package
+
+151.5 MiB of that table is the Arch `linux` package, and Dome does not use it. Dome builds its
+own kernel image (11.7 MB) from a profile (T31) with the devices this engine actually exposes —
+virtio-mmio, a 16550 UART — compiled in. There are no modules, because there is no hardware to
+have modules for. That single decision is worth more than every package choice combined.
+
+### Two stages: build tools never reach the release
+
+Compiling needs a toolchain; running does not. A recipe therefore has two stages, and the
+release is assembled from the first one only:
 
 ```toml
 [foundation]
 name = "app"
 arch = "x86_64"
-init = "sentinel"        # or none, busybox, systemd, openrc, runit, s6, dinit, path:/...
-static_linking = true    # default; this is what removes glibc
+kernel = "dome-minimal"   # Dome builds it; no distribution kernel involved
+init = "sentinel"         # or none, busybox, systemd, openrc, runit, s6, dinit, path:/...
+static_linking = true     # default; this is what removes glibc
 workload = "/usr/bin/app"
-packages = []            # empty means kernel plus init, nothing else
+package_manager = "none"  # none (default) | apk | pacman
+packages = []             # what the release keeps; empty is valid
+
+[build]
+packages = ["rust", "gcc", "git"]              # used to build, never shipped
+artifacts = ["/build/target/release/app"]      # copied into the release
 ```
 
-An empty `packages` list is valid and is the leanest image Dome can produce. The recipe is
-validated (`crates/dome-config/src/foundation_recipe.rs`), and `plan()` says what the choices
-cost: it adds the init system's own dependencies to the closure, and states the measured price of
-a service manager or of dynamic linking rather than leaving it to be discovered.
+Because the release is built from the runtime closure and the artifacts alone, the toolchain
+cannot survive by accident — there is no "remove it afterwards and hope the dependencies went
+with it" step. Nothing that was installed only for building is ever present to remove.
+
+Validation is strict about the things that would be quiet mistakes: a package listed in both
+stages is refused (nobody could tell which copy the image has), an artifact path must be
+absolute, and an unknown init, architecture or package manager is rejected by name.
+
+### The package manager is opt-in, and usually absent
+
+By default the release has **no package manager**. The builder fetches the named packages on the
+host and writes them into the root filesystem, which means the image contains nothing that can
+install anything — a much smaller surface than an image carrying apk or pacman.
+
+`package_manager = "apk"` or `"pacman"` puts one in, for images that genuinely should install at
+runtime. That is a choice with a cost and it is recorded as one: the plan says the image can
+install packages, rather than leaving it to be discovered.
+
+### What an empty recipe means
+
+```toml
+[foundation]
+name = "app"
+init = "sentinel"
+```
+
+That is a complete, valid foundation: Dome's kernel, the sentinel init, static linking, no
+packages, no build stage, no package manager. Roughly 12 MB, and it boots. Anything more is
+something you asked for.
+
+The recipe is validated (`crates/dome-config/src/foundation_recipe.rs`, twenty-one tests) and
+`plan()` states what the choices cost: it adds the init system's own dependencies to the closure,
+and reports the measured price of a service manager or of dynamic linking rather than leaving it
+to be discovered.
 
 ## The base foundation: clean sheet, then install
 

@@ -1,0 +1,20 @@
+# T71 - no distro kernel, build stage stripped, package manager opt-in
+# command: cargo test -p dome-config --test foundation_recipe -j4
+
+build_packages_are_not_part_of_the_release ... ok
+artifacts_are_copied_into_the_release ... ok
+a_package_in_both_stages_is_refused ... ok
+a_relative_artifact_path_is_refused ... ok
+the_kernel_is_dome_own_build_by_default ... ok
+no_package_manager_is_the_default ... ok
+a_package_manager_can_be_asked_for ... ok
+an_unknown_package_manager_is_refused ... ok
+a_truly_empty_recipe_is_a_kernel_and_an_init ... ok
+
+# test result: ok. 21 passed
+#
+# an empty recipe is a complete foundation:
+#   [foundation]
+#   name = "app"
+#   init = "sentinel"
+# = Dome kernel (11.7 MB) + sentinel + static, no packages, no PM, no build stage.
