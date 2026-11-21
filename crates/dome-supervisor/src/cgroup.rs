@@ -80,6 +80,15 @@ pub enum SupervisorError {
         reason: String,
     },
 
+    /// The engine process could not be started.
+    #[error("cannot start {program}: {reason}")]
+    Spawn {
+        /// Program that failed to start.
+        program: String,
+        /// Why it failed.
+        reason: String,
+    },
+
     /// A namespace link did not have the expected shape.
     #[error("process {pid} has an unreadable network namespace: {value}")]
     UnexpectedNetns {

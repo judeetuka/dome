@@ -1,4 +1,5 @@
 pub mod cgroup;
+pub mod chamber;
 pub mod frame;
 pub mod network;
 pub mod relay;

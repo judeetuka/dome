@@ -1,0 +1,9 @@
+# T24 — chamber create orchestrator
+# command: cargo test -p dome-supervisor --test chamber -j4
+
+test the_engine_child_receives_the_control_channel_on_fd_three ... ok
+test the_engine_child_is_attached_to_the_chamber_cgroup ... ok
+test an_impossible_perimeter_leaves_no_cgroup_behind ... ok
+test destroying_a_chamber_removes_its_cgroup ... ok
+
+# verified by reading /proc/<pid>/fd/3 (a socket) and cgroup.procs from the kernel

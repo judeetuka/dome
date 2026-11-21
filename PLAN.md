@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 195 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 199 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -427,7 +427,7 @@ Wave M3 (Linux Native Engine — 7 tasks) — COMPLETE:
 Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
 ├── T22: cgroups v2 integration [DONE]
 ├── T23: Network namespace integration (per-chamber netns) [deep]
-├── T24: Chamber create orchestrator [deep]
+├── T24: Chamber create orchestrator [DONE]
 ├── T25: Chamber run/stop lifecycle [deep]
 ├── T26: Chamber seal (save to .seal.dome) [deep]
 ├── T27: Chamber export [deep]
@@ -2159,7 +2159,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 24. **Chamber Create Orchestrator**
+- [x] 24. **Chamber Create Orchestrator**
 
   **What to do**:
   - Implement `dome-supervisor/src/orchestrator.rs`:
@@ -2181,6 +2181,30 @@ Max Concurrent: 6 (M1 wave)
   **Recommended Agent Profile**: `deep` — orchestration logic
   **Parallelization**: Can Run In Parallel NO | Blocks: T25, T26 | Blocked By: T22, T23
   **References**: `crates/dome-supervisor/src/lib.rs` — `ChamberRecord`, `ChamberState`; `crates/dome-engine/src/lib.rs` — `Engine` trait, `LaunchPlan`
+
+  **Done** (2026). `crates/dome-supervisor/src/chamber.rs`. **Four tests, each spawning a
+  real child process.**
+
+  The ordering is the part that matters, and it is the order T20 and T23 forced:
+
+  1. validate the perimeter — a chamber with an impossible policy never holds resources, so
+     a privileged port leaves no cgroup behind (tested);
+  2. create the cgroup, so limits exist before any process does;
+  3. create the relay socketpair;
+  4. spawn the engine child with the chamber end handed across `exec` on fd 3;
+  5. attach the child to the cgroup.
+
+  The fd handoff uses `pre_exec` and `dup2`, which is the one place this crate needs
+  `unsafe`: inheriting a specific descriptor across `exec` has no safe equivalent. The
+  closure captures only an integer and calls nothing but async-signal-safe functions.
+
+  A test proves the handoff by spawning `/bin/sh`, then reading `/proc/<pid>/fd/3` and
+  requiring it to be a socket. Another reads `cgroup.procs` and requires the child's pid to
+  be in it. Neither would pass if the descriptor were merely inherited by accident.
+
+  **Known gap, deliberately left to T25/T28**: the child here is `/bin/sh`. The engine-side
+  wiring — unshare, then `spawn_chamber(fd 3)`, then launch the kernel — is the run
+  lifecycle, not the orchestrator.
 
   **Acceptance Criteria**:
   - [ ] `create()` orchestrates engine + cgroup + netns

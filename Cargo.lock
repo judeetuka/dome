@@ -537,6 +537,7 @@ version = "0.1.0"
 dependencies = [
  "dome-core",
  "dome-net",
+ "libc",
  "thiserror 2.0.21",
 ]
 
