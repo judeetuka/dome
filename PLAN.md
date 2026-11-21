@@ -371,9 +371,9 @@ Wave M2 (Dome Foundation Format — 5 tasks, 3 parallel):
 
 Wave M3 (Linux Native Engine — 7 tasks, 4 parallel):
 ├── T15: KVM dependencies + unsafe override [quick]
-├── T16: LinuxEngine struct (Engine trait impl) [deep]
-├── T17: Guest memory manager (vm-memory) [deep]
-├── T18: Kernel loader (vmlinux + bzImage) [deep]
+├── T16: LinuxEngine struct [DONE]
+├── T17: Guest memory manager [DONE]
+├── T18: Kernel loader (bzImage) [DONE]
 ├── T19: VCPU lifecycle (create, init, run loop skeleton) [deep]
 ├── T20: Engine process sandbox (seccomp + Landlock) [deep]
 └── T21: M3 integration tests (capability, failure, minimal boot) [unspecified-high]
@@ -1519,38 +1519,23 @@ Max Concurrent: 6 (M1 wave)
   - `kvm-ioctls` docs — `Kvm::new()`, capability querying
   - `.rules/security.md:13-21` — M1/M3 restrictions on mutation
 
+  **Completed** (2026). Implementation is `crates/dome-engine/src/linux.rs`.
+
+  - `LinuxEngine::open()` maps a missing or unusable `/dev/kvm` to
+    `EngineError::DeviceUnavailable`, never a panic — the CLI turns that into exit code 4.
+  - Capabilities report what the host actually is: `linux-kvm`, same-arch guests only, and
+    the **probed** confidentiality and IOMMU state rather than a hard-coded value.
+  - `validate` enforces the ADR 0002 rules: more RAM than the host has is a `Memory` error,
+    more vCPUs than cores is a `Setup` error, and `device_access = explicit_apertures` on a
+    host with no IOMMU is `EngineError::IoMmuUnavailable`. Verified live: this Intel box
+    has zero IOMMU groups, so that path is exercised by a real test, not a mock.
+
   **Acceptance Criteria**:
-  - [ ] `LinuxEngine::new()` succeeds when `/dev/kvm` is accessible
-  - [ ] `LinuxEngine::new()` returns `EngineError::KvmNotAvailable` when KVM absent
-  - [ ] `Engine::capabilities()` reports correct host arch and acceleration
-  - [ ] `Engine::validate()` rejects plan with unsupported guest arch
-  - [ ] `cargo test -p dome-engine` passes
-
-  **QA Scenarios**:
-  ```
-  Scenario: Engine detects KVM availability
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-engine --test launch_plan 2>&1
-      2. Assert: engine tests pass
-      3. If /dev/kvm exists: assert capabilities show NativeHypervisor
-      4. If /dev/kvm absent: assert capabilities show Unavailable
-    Expected Result: Engine adapts to host capabilities
-    Evidence: evidence/task-16-engine-cap.txt
-
-  Scenario: Graceful failure when KVM inaccessible
-    Tool: Bash
-    Steps:
-      1. Temporarily restrict /dev/kvm permissions (or use fixture)
-      2. Attempt LinuxEngine::new()
-      3. Assert: returns EngineError (not panic)
-    Expected Result: No panic, clear error message
-    Evidence: evidence/task-16-engine-fail.txt
-  ```
-
-  **Commit**: NO (groups with T17, T18, T19)
-
----
+  - [x] `LinuxEngine` wraps `Kvm` and implements `Engine`
+  - [x] `open()` distinguishes "no hypervisor" from "engine broken"
+  - [x] Capabilities are probed, including confidential memory and IOMMU enforcement
+  - [x] `validate` rejects over-large chambers and uncontainable DMA apertures
+  - [x] Five tests, each tolerant of a host without KVM
 
 - [ ] 17. **Guest Memory Manager (vm-memory integration)**
 
@@ -1581,27 +1566,20 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-core/src/lib.rs:69-99` — `MemorySize`, `StorageSize` types
   - `crates/dome-engine/src/lib.rs:3-7` — `LaunchPlan` with cell limits
 
+  **Completed** (2026). Implementation is `crates/dome-engine/src/memory.rs`.
+
+  `GuestMemory` owns one contiguous `GuestMemoryMmap` covering physical address space and
+  bounds-checks every access against the region it actually owns. A write or read that
+  crosses the end returns `EngineError::Memory`; address arithmetic overflow is caught
+  before the map is touched. `MAX_MEMORY_BYTES` (1 TiB) turns an absurd blueprint into a
+  typed error instead of a mid-boot allocation failure.
+
   **Acceptance Criteria**:
-  - [ ] `GuestMemoryManager::allocate()` succeeds with valid plan
-  - [ ] Allocated memory size equals `plan.cell().limits().memory()`
-  - [ ] `write_region` + `read_region` round-trip works
-  - [ ] Allocation failure returns error, not panic
-
-  **QA Scenarios**:
-  ```
-  Scenario: Memory allocation matches cell spec
-    Tool: Bash
-    Steps:
-      1. Create LaunchPlan with 256 MiB memory
-      2. Allocate GuestMemoryManager
-      3. Assert: allocated size == 256 MiB
-    Expected Result: Memory allocation honors cell limits
-    Evidence: evidence/task-17-memory-alloc.txt
-  ```
-
-  **Commit**: NO (groups with T16, T18, T19)
-
----
+  - [x] `allocate` honours the requested size exactly
+  - [x] `write`/`read` round-trip
+  - [x] Past-the-end and overflowing accesses are typed errors, not panics
+  - [x] `host_address()` exposes the mapping KVM needs, stable across calls
+  - [x] Seven tests
 
 - [ ] 18. **Kernel Loader (vmlinux + bzImage)**
 
@@ -1631,28 +1609,25 @@ Max Concurrent: 6 (M1 wave)
   - `linux-loader` docs — `loader::Elf::load()`, `loader::BzImage::load()`
   - `kvm-ioctls` docs — `Kvm::create_vm()`, `VmFd`
 
+  **Completed** (2026, bzImage only). Implementation is `crates/dome-engine/src/loader.rs`.
+
+  ELF (`vmlinux`) is deliberately deferred: the spike proved the bzImage path end to end, and
+  a second parser is attack surface with no current need (ADR 0002). Add ELF when a
+  foundation actually ships an uncompressed kernel.
+
+  The loader refuses four things that would otherwise fail mysteriously later: a start
+  address below 1 MiB, an unaligned start address, an image that does not fit, and an image
+  whose declared `init_size` decompression workspace does not fit — that last one is the
+  failure that produces a silent guest with no console output.
+
+  `LoadedKernel` implements `Debug` by hand because `setup_header` is `#[repr(packed)]` and
+  formatting its fields by reference is undefined behaviour.
+
   **Acceptance Criteria**:
-  - [ ] `load_elf()` succeeds with a valid vmlinux
-  - [ ] `load_bzimage()` succeeds with a valid bzImage
-  - [ ] `auto_detect()` correctly identifies format
-  - [ ] Kernel entry point address is non-zero
-  - [ ] Kernel load respects memory bounds
-
-  **QA Scenarios**:
-  ```
-  Scenario: Load a known-good test kernel
-    Tool: Bash
-    Steps:
-      1. Use a minimal test kernel (can be a tiny ELF)
-      2. Load via KernelLoader::auto_detect()
-      3. Assert: KernelInfo.entry_point is valid
-    Expected Result: Kernel loaded at correct address
-    Evidence: evidence/task-18-kernel-load.txt
-  ```
-
-  **Commit**: NO (groups with T16, T17, T19)
-
----
+  - [x] Loads the real Alpine 6.12 bzImage fixture at 0x100000
+  - [x] Returns entry point, parsed setup header and end address
+  - [x] Rejects unaligned, too-low, missing and too-large cases with typed errors
+  - [x] Five tests including the real kernel
 
 - [ ] 19. **VCPU Lifecycle (create, init, run loop)**
 

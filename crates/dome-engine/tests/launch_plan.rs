@@ -3,7 +3,8 @@ use dome_core::{
     StorageSize,
 };
 use dome_engine::{
-    AccelerationMode, CpuArch, EngineCapabilities, HostOs, LaunchPlan, PreparedStorageMode,
+    AccelerationMode, ConfidentialMemory, CpuArch, EngineCapabilities, HostOs, LaunchPlan,
+    PreparedStorageMode,
 };
 
 #[test]
@@ -35,6 +36,8 @@ fn engine_capabilities_are_platform_neutral() {
         supports_file_apertures: true,
         supports_display: false,
         supports_cold_seals: true,
+        confidential_memory: ConfidentialMemory::Unavailable,
+        enforces_iommu: false,
     };
 
     assert_eq!(capabilities.host_os, HostOs::Linux);

@@ -16,7 +16,15 @@ pub enum EngineError {
     UnsupportedGuestArch { engine: String, guest: String },
     #[error("launch failed: {0}")]
     Launch(String),
+    #[error("host cannot contain a DMA-capable aperture: {0}")]
+    IoMmuUnavailable(String),
 }
+
+pub mod loader;
+pub mod memory;
+
+#[cfg(target_os = "linux")]
+pub mod linux;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchPlan {
@@ -51,6 +59,50 @@ pub enum CpuArch {
     Aarch64,
 }
 
+/// Hardware-backed confidentiality for guest memory.
+///
+/// Ordered by strength. `Unavailable` means guest RAM sits in the VMM's address space and
+/// a host root can read it — the honest default on most consumer hardware. Anything above
+/// `Unavailable` encrypts guest memory against the host and is the only basis on which
+/// host-to-chamber confidentiality may be claimed (see docs/adr/0002-isolation-model.md).
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConfidentialMemory {
+    /// No hardware support: host root can read guest memory.
+    Unavailable,
+    /// AMD Secure Encrypted Virtualization (encrypted, no integrity protection).
+    Sev,
+    /// SEV with Encrypted State (register state protected too).
+    SevEs,
+    /// SEV Secure Nested Paging: encrypted, integrity-protected, attestable.
+    SevSnp,
+    /// Intel Trust Domain Extensions: encrypted, integrity-protected, attestable.
+    Tdx,
+    /// ARM Confidential Compute Architecture realms.
+    Cca,
+}
+
+impl ConfidentialMemory {
+    /// Stable wire name for reports and blueprints.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::Sev => "sev",
+            Self::SevEs => "sev-es",
+            Self::SevSnp => "sev-snp",
+            Self::Tdx => "tdx",
+            Self::Cca => "cca",
+        }
+    }
+
+    /// Whether this mode lets Dome claim confidentiality against a malicious host.
+    ///
+    /// Deliberately narrow: plain SEV has known weaknesses (no integrity, IV reuse fixed
+    /// only in later revisions), so only SEV-ES and above qualify.
+    pub fn protects_against_host(self) -> bool {
+        matches!(self, Self::SevEs | Self::SevSnp | Self::Tdx | Self::Cca)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AccelerationMode {
     NativeHypervisor,
@@ -76,6 +128,10 @@ pub struct EngineCapabilities {
     pub supports_file_apertures: bool,
     pub supports_display: bool,
     pub supports_cold_seals: bool,
+    /// Hardware confidentiality available for chamber memory on this host.
+    pub confidential_memory: ConfidentialMemory,
+    /// Whether the host enforces an IOMMU, without which no DMA-capable aperture is safe.
+    pub enforces_iommu: bool,
 }
 
 pub trait Engine {

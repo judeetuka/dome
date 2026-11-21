@@ -100,3 +100,42 @@ fn renders_devices_as_toml() {
     assert!(output.contains("class = \"gpu\""));
     assert!(output.contains("readiness = \"unsafe-iommu-group\""));
 }
+
+#[test]
+fn reports_confidential_capabilities_honestly() {
+    let report = HostReport::probe_root(&fixture_root());
+    let confidential = &report.confidential;
+
+    // The fixture CPU advertises vmx only: no SME/SEV/TDX, so no confidentiality claim.
+    assert!(!confidential.cpu_sme_or_sev);
+    assert!(!confidential.sev_device_present);
+    assert!(!confidential.cpu_tdx);
+    assert!(!confidential.tdx_device_present);
+    assert_eq!(confidential.best_available(), "unavailable");
+
+    // A TPM is present in the fixture, which is what enables measured boot.
+    assert!(confidential.tpm_present);
+
+    // The fixture has IOMMU groups, so DMA containment is possible there.
+    assert!(confidential.iommu_enforced);
+}
+
+#[test]
+fn renders_confidential_section_as_toml() {
+    let output = HostReport::probe_root(&fixture_root()).to_toml();
+
+    assert!(output.contains("[confidential]"));
+    assert!(output.contains("cpu_sme_or_sev = false"));
+    assert!(output.contains("tpm_present = true"));
+    assert!(output.contains("iommu_enforced = true"));
+    assert!(output.contains("best_available = \"unavailable\""));
+}
+
+#[test]
+fn human_output_reports_confidentiality() {
+    let output = HostReport::probe_root(&fixture_root()).to_human_text();
+
+    assert!(output.contains("confidential memory: unavailable"));
+    assert!(output.contains("tpm: yes"));
+    assert!(output.contains("iommu enforced: yes"));
+}

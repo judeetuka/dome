@@ -69,6 +69,7 @@ pub struct HostReport {
     pub network: NetworkReport,
     pub assembler: AssemblerReport,
     pub devices: DeviceReport,
+    pub confidential: ConfidentialReport,
 }
 
 impl HostReport {
@@ -112,6 +113,7 @@ impl HostReport {
                 nasm_available: executable_in_path("nasm"),
             },
             devices: probe_devices(root),
+            confidential: probe_confidential(root),
         }
     }
 
@@ -162,6 +164,19 @@ impl HostReport {
             self.assembler.gnu_as_available,
             self.assembler.nasm_available,
         );
+
+        output.push_str(&format!(
+            "\n\n[confidential]\ncpu_sme_or_sev = {}\nsev_device_present = {}\n\
+cpu_tdx = {}\ntdx_device_present = {}\ntpm_present = {}\niommu_enforced = {}\n\
+best_available = \"{}\"\n",
+            self.confidential.cpu_sme_or_sev,
+            self.confidential.sev_device_present,
+            self.confidential.cpu_tdx,
+            self.confidential.tdx_device_present,
+            self.confidential.tpm_present,
+            self.confidential.iommu_enforced,
+            self.confidential.best_available(),
+        ));
 
         output.push_str("\n\n[devices]\n");
         output.push_str(&format!(
@@ -220,7 +235,10 @@ impl HostReport {
         );
 
         output.push_str(&format!(
-            "\ndevices: {}\nvfio nodes: {}",
+            "\nconfidential memory: {}\ntpm: {}\niommu enforced: {}\ndevices: {}\nvfio nodes: {}",
+            self.confidential.best_available(),
+            yes_no(self.confidential.tpm_present),
+            yes_no(self.confidential.iommu_enforced),
             self.devices.candidates.len(),
             self.devices.vfio_devices.len()
         ));
@@ -271,6 +289,39 @@ pub struct SecurityReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkReport {
     pub namespace_visible: bool,
+}
+
+/// Hardware-backed confidentiality and the attestation building blocks around it.
+///
+/// Reported rather than assumed: a CPU that lists \`sev\` in its flags can still have SEV
+/// disabled by firmware, so the device nodes are checked as well.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConfidentialReport {
+    /// CPU advertises AMD SME/SEV in \`/proc/cpuinfo\`.
+    pub cpu_sme_or_sev: bool,
+    /// An SEV device node exists (\`/dev/sev\` or \`/dev/sev-guest\`).
+    pub sev_device_present: bool,
+    /// CPU advertises Intel TDX.
+    pub cpu_tdx: bool,
+    /// A TDX guest device exists.
+    pub tdx_device_present: bool,
+    /// A TPM character device exists, which enables measured boot and PCR-sealed keys.
+    pub tpm_present: bool,
+    /// The host enforces an IOMMU, which is what makes DMA-capable apertures safe.
+    pub iommu_enforced: bool,
+}
+
+impl ConfidentialReport {
+    /// Best available confidentiality mode, from the evidence gathered above.
+    pub fn best_available(&self) -> &'static str {
+        if self.cpu_tdx && self.tdx_device_present {
+            "tdx"
+        } else if self.cpu_sme_or_sev && self.sev_device_present {
+            "sev"
+        } else {
+            "unavailable"
+        }
+    }
 }
 
 /// PCI devices visible to the host, with enough context to judge passthrough safety.
@@ -387,6 +438,23 @@ fn can_open_read_write(root: &ProbeRoot, path: &str) -> bool {
         .write(true)
         .open(root.path(path))
         .is_ok()
+}
+
+fn probe_confidential(root: &ProbeRoot) -> ConfidentialReport {
+    let cpuinfo = root.read_to_string("/proc/cpuinfo").unwrap_or_default();
+
+    let has_flag = |flag: &str| cpuinfo.split_whitespace().any(|token| token == flag);
+
+    ConfidentialReport {
+        cpu_sme_or_sev: has_flag("sme") || has_flag("sev") || has_flag("sev_es"),
+        sev_device_present: root.exists("/dev/sev") || root.exists("/dev/sev-guest"),
+        cpu_tdx: has_flag("tdx"),
+        tdx_device_present: root.exists("/dev/tdx_guest") || root.exists("/dev/tdx-guest"),
+        tpm_present: root.exists("/dev/tpm0") || root.exists("/dev/tpmrm0"),
+        // An IOMMU is only useful if it actually has groups; an empty directory means
+        // either no IOMMU or one that failed to initialise.
+        iommu_enforced: root.has_directory_entries("/sys/kernel/iommu_groups"),
+    }
 }
 
 fn has_virtualization_flag(cpuinfo: &str) -> bool {

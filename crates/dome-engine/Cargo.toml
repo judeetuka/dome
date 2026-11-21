@@ -21,5 +21,8 @@ vmm-sys-util = "0.15"
 # `[lints] workspace = true` — combining it with an override is a manifest parse error.
 # `unsafe_code = "warn"` (not "allow") keeps every unsafe block visible in review.
 # The workspace `forbid` still protects all other crates.
+[dev-dependencies]
+dome-test-utils = { path = "../dome-test-utils" }
+
 [lints.rust]
 unsafe_code = "warn"

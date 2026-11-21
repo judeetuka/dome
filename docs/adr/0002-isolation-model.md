@@ -102,6 +102,27 @@ claim that the host cannot read a running chamber. The engine must **detect and 
 unavailability**, never silently pretend. This is the same rule
 `.rules/security.md:26` already states.
 
+
+## The isolation ladder (what each host actually gets)
+
+Probed on 2026 hardware. Neither machine has confidential computing; the difference
+between them is what else they can enforce.
+
+| Tier | Requires | Guarantees | This Intel box | The Beelink (Ryzen 7 5800H) |
+|---|---|---|---|---|
+| **0 — baseline** | KVM | separate kernel/MMU/EPT; three-device model; engine cage; cgroup caps | **yes** | yes |
+| **1 — enforced IOMMU + measured boot** | IOMMU groups + TPM 2.0 | DMA containment for device apertures; PCR-sealed keys; attested boot chain | **no** (0 IOMMU groups) | **partially**: 19 IOMMU groups, TPM 2.0 + IMA/EVM/lockdown, but kvm_amd reports sev=N |
+| **2 — confidential memory** | SEV-SNP, TDX or CCA | guest RAM encrypted against the host; attestable launch | **no** | **no** (flags absent, \`/dev/sev\` absent, kvm_amd sev/sev_es/sev_snp all N) |
+
+The engine detects the tier at open time and reports it; it never assumes. \`doctor\` prints a
+[confidential] table with the raw evidence so a claim can always be traced to a probe.
+
+Design consequence: **Tier 2 is a feature flag, not a fork.** When a host with SEV-SNP or
+TDX appears, the engine selects it during launch and the confidentiality claim becomes
+permitted; nothing in the baseline design changes. The Beelink is the natural Tier 1
+reference machine: it can validate the IOMMU enforcement path and TPM sealing that the
+Intel box cannot.
+
 ## What each direction can honestly claim
 
 **Chamber → host (the direction we can engineer):** a chamber runs its own kernel on
