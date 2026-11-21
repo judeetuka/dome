@@ -428,10 +428,15 @@ dependencies = [
 name = "dome-cli"
 version = "0.1.0"
 dependencies = [
+ "age",
  "clap",
  "clap_complete",
  "dome-config",
+ "dome-core",
+ "dome-crypto",
+ "dome-engine",
  "dome-host-linux",
+ "dome-image",
  "dome-obfuscation",
  "thiserror 2.0.21",
 ]
@@ -460,6 +465,7 @@ version = "0.1.0"
 dependencies = [
  "age",
  "aws-lc-rs",
+ "secrecy",
  "thiserror 2.0.21",
 ]
 

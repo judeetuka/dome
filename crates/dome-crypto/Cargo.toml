@@ -7,6 +7,7 @@ license.workspace = true
 description = "Cryptographic primitives for Dome images and seals"
 
 [dependencies]
+secrecy = "0.10"
 aws-lc-rs = "1.18"
 age = { version = "0.11", default-features = false, features = ["armor"] }
 thiserror.workspace = true

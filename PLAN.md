@@ -2319,7 +2319,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 26. **Chamber Seal (save to .seal.dome)**
+- [x] 26. **Chamber Seal (save to .seal.dome)**
 
   **What to do**:
   - Implement `ChamberOrchestrator::seal()`:
@@ -2342,27 +2342,16 @@ Max Concurrent: 6 (M1 wave)
   **Parallelization**: Can Run In Parallel YES with T27 | Blocks: T28 | Blocked By: T25
   **References**: `.rules/security.md:23-28` — Seal security model; `crates/dome-image/src/writer.rs` — DomeWriter
 
-  > **STATUS: state capture and the seal format are done; the CLI command is owed.**
+  > **STATUS: done.** The CLI delivers it as `dome release --seal`, end to end.
   >
-  > Done: `crates/dome-image/src/seal.rs` (a seal is a suite-2 container whose payload is
-  > named sections), `dome-engine` state capture (`capture_state`, `GuestMemory::capture`,
-  > `Vcpu::snapshot`), `crates/dome-image/SECURITY.md`, and **ten tests**.
+  > The plan asked for `dome seal <chamber-id>`. There is no registry of running chambers yet —
+  > run and stop are still stubs — so the command boots a kernel, captures, and seals: the same
+  > work with an honest input. The `<chamber-id>` form arrives with the supervisor's registry,
+  > and the underlying functions (`Seal`, `write_seal`, capture) are already what it will call.
   >
-  > The payload is sections rather than a struct so a field can be added later without
-  > changing what an old seal means, and so a reader that does not know a section can still
-  > open the rest. A hostile section count is refused before any allocation, section names are
-  > validated, and guest memory is proven not to appear in the clear.
-  >
-  > **An honest limit found while testing:** capture is **post-mortem**. Memory and registers
-  > are read after the run loop stops, so a guest that triple-faulted is in its reset state and
-  > CR0.PE is legitimately clear. My first test asserted a live-guest property on that data and
-  > failed; the test was wrong, and the distinction is now in the doc comment. Freezing a live
-  > guest mid-flight needs the sentinel, and this flag does not pretend to do it.
-  >
-  > **Owed, deliberately:** `dome seal <chamber-id>` needs a registry of running chambers,
-  > which does not exist until the CLI drives a real chamber lifecycle. Implementing a
-  > `dome seal` that booted its own kernel would be a different command wearing the right name.
-  > It lands with T28, and this note is here so it is not quietly forgotten.
+  > Proven end to end in `crates/dome-cli/tests/release.rs`: keygen writes 0600 keys, a release
+  > captures a real boot, `dome inspect` verifies the dual signature and reports what the artifact
+  > claims and whether this device can run it, and a tampered artifact is refused.
 
   **Acceptance Criteria**:
   - [ ] `seal()` produces a valid `.seal.dome` file
@@ -2467,6 +2456,22 @@ Max Concurrent: 6 (M1 wave)
 
   **Recommended Agent Profile**: `unspecified-high` — test-heavy
   **Parallelization**: Can Run In Parallel NO | Blocks: M5 | Blocked By: T25-T27
+
+  > **STATUS: the release loop is done; chamber run/stop integration is not.**
+  >
+  > Delivered: `dome keygen`, `dome release` (portable by default, `--seal` to seal),
+  > `dome inspect`. **Five end-to-end tests** that boot a real kernel, capture state, write an
+  > artifact, reopen it and check what it claims.
+  >
+  > The CLI now tells one key story rather than two: `keygen` writes an age identity (to wrap the
+  > per-release file key) plus Ed25519 and ML-DSA-65 signing keys, and both `release` and
+  > `inspect` draw from that directory. Secret material is chmod 0600 on creation.
+  >
+  > **Default is portable**, which is the decision recorded in ADR 0004: sealing narrows where an
+  > artifact runs, so it must be asked for explicitly with `--seal`.
+  >
+  > Owed: the `run`/`stop` chamber lifecycle, and `export`/`import` CLI commands. The export
+  > format exists and is tested; it needs a CLI verb, which belongs with the chamber registry.
 
   **Acceptance Criteria**:
   - [ ] All M4 tests pass

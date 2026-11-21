@@ -5,6 +5,8 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dome_config::Blueprint;
 use dome_host_linux::{HostReport, ProbeRoot};
 
+pub mod release;
+
 /// Dome command-line entry point.
 #[derive(Debug, Parser)]
 #[command(
@@ -62,22 +64,49 @@ enum Commands {
         chamber_id: String,
     },
 
-    /// Save running chamber state to a .seal.dome (arrives in M4)
-    Seal {
-        #[arg(value_name = "CHAMBER_ID")]
-        chamber_id: String,
-        /// Output path; defaults to <chamber-id>.seal.dome
-        #[arg(long, value_name = "PATH")]
-        output: Option<PathBuf>,
-    },
-
-    /// Export a chamber as a self-contained package (arrives in M4)
-    Export {
-        #[arg(value_name = "CHAMBER_ID")]
-        chamber_id: String,
-        /// Output path; required because exports are large
+    /// Build a release artifact from a cell blueprint
+    Release {
+        /// Path to the cell blueprint, which is embedded in the artifact
+        #[arg(long, value_name = "CELL_TOML")]
+        cell: PathBuf,
+        /// Kernel to capture state from
+        #[arg(long, value_name = "BZIMAGE")]
+        kernel: PathBuf,
+        /// Optional initramfs
+        #[arg(long, value_name = "IMAGE")]
+        initramfs: Option<PathBuf>,
+        /// Guest memory in MiB for the capture boot
+        #[arg(long, value_name = "MIB", default_value_t = 64)]
+        memory_mib: u64,
+        /// Key directory from dome keygen
+        #[arg(long, value_name = "DIR")]
+        keys: PathBuf,
+        /// Where to write the artifact
         #[arg(long, value_name = "PATH", required = true)]
         output: PathBuf,
+        /// Seal the release: it will run only on hardware that keeps guest memory confidential
+        #[arg(long)]
+        seal: bool,
+        /// Declare the protection this device offers while capturing
+        #[arg(long, value_name = "TIER", default_value = "none")]
+        captured_on: String,
+    },
+
+    /// Generate the keys a release needs
+    Keygen {
+        /// Directory to write the keys into
+        #[arg(long, value_name = "DIR", required = true)]
+        out: PathBuf,
+    },
+
+    /// Verify a release and report whether this device can run it
+    Inspect {
+        /// Path to the artifact
+        #[arg(value_name = "ARTIFACT")]
+        artifact: PathBuf,
+        /// Key directory that can open it
+        #[arg(long, value_name = "DIR")]
+        keys: PathBuf,
     },
 
     /// Build a foundation from a recipe (arrives in M5)
@@ -178,8 +207,49 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
 
         Commands::Run { .. } => Err(CliError::NotYetImplemented("run")),
         Commands::Stop { .. } => Err(CliError::NotYetImplemented("stop")),
-        Commands::Seal { .. } => Err(CliError::NotYetImplemented("seal")),
-        Commands::Export { .. } => Err(CliError::NotYetImplemented("export")),
+        Commands::Release {
+            cell,
+            kernel,
+            initramfs,
+            memory_mib,
+            keys,
+            output,
+            seal,
+            captured_on,
+        } => {
+            let Some(protection) = release::parse_protection(&captured_on) else {
+                return Err(CliError::Usage(format!(
+                    "unknown protection tier {captured_on:?}; try none, tdx, sev-snp or shielded-vm"
+                )));
+            };
+
+            let files = release::KeyFiles::in_dir(&keys);
+            let mut options = release::ReleaseOptions::new(&cell, &kernel, &output, files);
+            options.initramfs = initramfs;
+            options.memory_mib = memory_mib;
+            options.sealed = seal;
+            options.captured_on = protection;
+
+            release::release(&options).map_err(CliError::Failed)
+        }
+
+        Commands::Keygen { out } => {
+            let files = release::KeyFiles::in_dir(&out);
+            files.generate().map_err(CliError::Failed)?;
+            files.seal_permissions().map_err(CliError::Failed)?;
+
+            Ok(format!(
+                "wrote keys to {}\n  identity: {}\n  signing: {}\n  mldsa: {}",
+                files.dir.display(),
+                files.identity.display(),
+                files.signing.display(),
+                files.mldsa.display()
+            ))
+        }
+
+        Commands::Inspect { artifact, keys } => {
+            release::inspect(&artifact, &release::KeyFiles::in_dir(&keys)).map_err(CliError::Failed)
+        }
         Commands::Build { .. } => Err(CliError::NotYetImplemented("build")),
         Commands::Foundation { .. } => Err(CliError::NotYetImplemented("foundation")),
     }
@@ -296,6 +366,9 @@ pub enum CliError {
     NotYetImplemented(&'static str),
     #[error("cannot read {path}: {reason}")]
     UnreadableFile { path: String, reason: String },
+    #[error("{0}")]
+    Failed(String),
+
     #[error("{source_path}: {count} problem(s) found\n{messages}")]
     InvalidBlueprint {
         source_path: String,

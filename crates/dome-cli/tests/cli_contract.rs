@@ -74,10 +74,11 @@ fn unreadable_blueprint_is_a_validation_failure() {
 
 #[test]
 fn unimplemented_commands_exit_2_and_say_so() {
-    let cases: [&[&str]; 4] = [
+    // seal and export are no longer stubs: release and inspect replaced them, so only the
+    // commands that genuinely do not exist yet are listed here.
+    let cases: [&[&str]; 3] = [
         &["run", VALID],
         &["stop", "chamber-1"],
-        &["seal", "chamber-1"],
         &["build", "--list"],
     ];
 
@@ -93,11 +94,50 @@ fn unimplemented_commands_exit_2_and_say_so() {
 }
 
 #[test]
-fn export_requires_an_output_path() {
-    let error = run(argv(&["export", "chamber-1"])).unwrap_err();
+fn release_requires_an_output_path() {
+    let error = run(argv(&[
+        "release", "--cell", VALID, "--kernel", "vmlinuz", "--keys", "keys",
+    ]))
+    .unwrap_err();
 
     assert!(matches!(error, CliError::Usage(_)));
     assert!(error.to_string().contains("--output"));
+}
+
+#[test]
+fn release_rejects_an_unknown_protection_tier() {
+    let error = run(argv(&[
+        "release",
+        "--cell",
+        VALID,
+        "--kernel",
+        "vmlinuz",
+        "--keys",
+        "keys",
+        "--output",
+        "out.dome",
+        "--captured-on",
+        "wishful-thinking",
+    ]))
+    .unwrap_err();
+
+    assert!(matches!(error, CliError::Usage(_)));
+    assert!(error.to_string().contains("protection tier"));
+}
+
+#[test]
+fn the_cli_offers_the_release_commands() {
+    // The contract is that these exist and parse; they are exercised for real in release.rs.
+    for case in [
+        &["keygen", "--out", "/tmp/dome-keys-"][..],
+        &["inspect", "artifact.dome", "--keys", "keys"][..],
+    ] {
+        let result = run(argv(case));
+        assert!(
+            result.is_ok() || matches!(result.unwrap_err(), CliError::Failed(_)),
+            "{case:?}"
+        );
+    }
 }
 
 #[test]

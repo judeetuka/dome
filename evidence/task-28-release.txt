@@ -1,0 +1,21 @@
+# T28 - the release loop, end to end
+# command: cargo test -p dome-cli --test release -j4
+
+keygen_writes_every_key_and_restricts_the_secrets ... ok
+keygen_refuses_to_overwrite_existing_keys ... ok
+a_release_is_portable_by_default_and_runs_here ... ok
+a_sealed_release_is_produced_here_but_cannot_run_here ... ok
+inspect_refuses_a_tampered_release ... ok
+
+test result: ok. 5 passed (7.4s, four of them booting a real kernel)
+
+cli contract:
+release_requires_an_output_path ... ok
+release_rejects_an_unknown_protection_tier ... ok
+the_cli_offers_the_release_commands ... ok
+
+# the loop exercised:
+#   dome keygen --out keys
+#   dome release --cell example.cell.toml --kernel vmlinuz-virt --keys keys --output r.dome
+#   dome release ... --seal
+#   dome inspect r.dome --keys keys

@@ -308,3 +308,23 @@ pub fn suite2_verify(
 
     Ok(())
 }
+
+/// Serialise an ML-DSA key pair as PKCS#8, for storage.
+///
+/// A release has to be verifiable by whoever holds the public half, so the signing key must
+/// survive a restart. PKCS#8 is the format aws-lc-rs already produces and parses, which keeps
+/// the private key in a shape a standard tool can inspect rather than an ad-hoc encoding.
+pub fn suite2_mldsa_to_pkcs8(key: &PqdsaKeyPair) -> Result<Vec<u8>, CryptoError> {
+    // v1 is the seed form, which is what a later build can reconstruct the key from.
+    let document = key.to_pkcs8v1().map_err(|error| {
+        CryptoError::InvalidKey(format!("cannot serialise ML-DSA key: {error}"))
+    })?;
+
+    Ok(document.as_ref().to_vec())
+}
+
+/// Load an ML-DSA key pair from PKCS#8.
+pub fn suite2_mldsa_from_pkcs8(document: &[u8]) -> Result<PqdsaKeyPair, CryptoError> {
+    PqdsaKeyPair::from_pkcs8(&ML_DSA_65_SIGNING, document)
+        .map_err(|error| CryptoError::InvalidKey(format!("cannot load ML-DSA key: {error}")))
+}

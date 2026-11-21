@@ -230,6 +230,24 @@ pub fn signing_key_from_pkcs8(document: &[u8]) -> Result<Ed25519KeyPair, CryptoE
 /// Parse an age identity from its `AGE-SECRET-KEY-1...` encoding.
 ///
 /// Uses the age format's X25519 identity encoding.
+/// Generate a fresh key-wrapping identity, returning its secret and public forms.
+///
+/// The secret is what a release's file key is wrapped to; the public form can be published,
+/// which is what lets someone else wrap a key you can open.
+pub fn generate_identity() -> Result<(String, String), CryptoError> {
+    let identity = age::x25519::Identity::generate();
+    let recipient = identity.to_public();
+
+    // The secret is deliberately wrapped by age; exposing it is the caller's explicit act,
+    // which is why this reads as a decision rather than a conversion.
+    use secrecy::ExposeSecret;
+    Ok((
+        identity.to_string().expose_secret().to_owned(),
+        recipient.to_string(),
+    ))
+}
+
+/// Parse an identity from text.
 pub fn identity_from_string(text: &str) -> Result<age::x25519::Identity, CryptoError> {
     age::x25519::Identity::from_str(text.trim())
         .map_err(|error| CryptoError::InvalidKey(format!("unusable age identity: {error}")))

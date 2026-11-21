@@ -15,6 +15,11 @@ clap_complete = "4"
 dome-config = { path = "../dome-config" }
 thiserror = { workspace = true }
 dome-host-linux = { path = "../dome-host-linux" }
+dome-core = { path = "../dome-core" }
+dome-crypto = { path = "../dome-crypto" }
+dome-image = { path = "../dome-image" }
+dome-engine = { path = "../dome-engine" }
+age = { version = "0.11", default-features = false }
 dome-obfuscation = { path = "../dome-obfuscation" }
 
 [lints]
