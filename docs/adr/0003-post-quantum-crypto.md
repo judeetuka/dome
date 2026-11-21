@@ -78,6 +78,13 @@ never from the constant it uses today, or a suite-2 file would be silently mis-f
 Primitives are already available in aws-lc-rs 1.19 (`kem` module, `ML_DSA_44/65/87`). `age`
 has no PQ recipient, so suite 2 defines its own wrapping rather than extending age.
 
+## Status: suite 2 is implemented
+
+Suite 2 ships as of this ADR's revision 2: X25519 + ML-KEM-768 wrapping per RFC 10024,
+HKDF-SHA256, AES-256-GCM, and dual Ed25519 + ML-DSA-65 signatures. 19 tests cover it,
+including separate tampering of each signature half and explicit refusal in both downgrade
+and upgrade directions. Suite 1 remains the default so existing content keeps its meaning.
+
 ## What is still not claimed
 
 Suite 1 remains the default until suite 2 ships and its vectors pass. Until then Dome must

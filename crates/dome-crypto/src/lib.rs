@@ -6,6 +6,8 @@
 //!
 //! This crate knows nothing about the `.dome` container. It takes bytes and returns bytes.
 
+pub mod pq;
+
 use std::io::{Read, Write};
 use std::str::FromStr;
 

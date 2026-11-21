@@ -1,0 +1,23 @@
+# T68 — post-quantum suite 2
+# command: cargo test -p dome-crypto -p dome-image -j4
+
+pq_suite (dome-crypto): 9 passed
+  a_wrapped_key_round_trips_through_the_hybrid
+  the_wrapped_blob_does_not_contain_the_key
+  a_different_identity_cannot_unwrap
+  wrapping_the_same_key_twice_differs
+  a_truncated_blob_is_a_typed_error
+  dual_signatures_verify_only_when_both_halves_do
+  tampered_data_breaks_the_signature
+  corrupting_only_the_ml_dsa_half_is_rejected
+  corrupting_only_the_ed25519_half_is_rejected
+
+suite2 (dome-image): 6 passed
+  a_suite2_container_round_trips
+  the_footer_length_follows_the_suite
+  a_suite1_reader_refuses_a_suite2_container
+  a_suite1_container_is_refused_by_a_suite2_reader
+  a_suite2_container_is_rejected_if_the_ml_dsa_key_is_wrong
+  the_suite2_signature_only_verifies_over_the_signed_bytes
+
+workspace total: 172

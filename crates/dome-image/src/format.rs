@@ -31,6 +31,28 @@ pub const VERSION: u32 = 1;
 /// Suite 1: X25519 key wrapping, AES-256-GCM content, Ed25519 signature. Classical only.
 pub const SUITE_CLASSICAL: u8 = 1;
 
+/// Suite 2: X25519 + ML-KEM-768 wrapping, AES-256-GCM content, Ed25519 + ML-DSA-65 signatures.
+pub const SUITE_HYBRID: u8 = 2;
+
+/// Length of the signature footer for a suite.
+///
+/// The footer length is **not** a constant: suite 2 carries an ML-DSA-65 signature of 3309
+/// bytes next to the 64-byte Ed25519 one. A reader that used a fixed length would frame a
+/// suite-2 file from the wrong offset, so every reader derives it here.
+pub fn signature_len_for_suite(suite: u8) -> Result<usize, FormatError> {
+    match suite {
+        SUITE_CLASSICAL => Ok(SIGNATURE_LEN),
+        SUITE_HYBRID => Ok(SIGNATURE_LEN + MLDSA65_SIGNATURE_LEN),
+        other => Err(FormatError::UnsupportedSuite {
+            found: other,
+            supported: SUITE_HYBRID,
+        }),
+    }
+}
+
+/// Length of an ML-DSA-65 signature (FIPS 204).
+pub const MLDSA65_SIGNATURE_LEN: usize = 3309;
+
 /// Length of the fixed header prefix, excluding the manifest ciphertext.
 ///
 /// magic(4) + version(4) + manifest_length(4) + suite(1) + nonce(12).

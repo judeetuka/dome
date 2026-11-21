@@ -32,7 +32,7 @@ verification is reproducible from a clean checkout.
 | --- | --- | --- |
 | Wave 0 + M1 (parsing, validation, CLI, CI) | T1, T3–T9 | **done** (8/8) |
 | Risk-death + decisions | T59–T62 | **done** (4/4) — spike, privilege ADR, CLI contract, hygiene |
-| **M2** format + crypto | T10–T14 | **DONE** (5/5) — crypto, header, writer, reader, integration |
+| **M2** format + crypto | T10–T14, T68 | **DONE** (6/6) — crypto, header, writer, reader, integration, PQ suite 2 |
 | **M3** engine | T15–T21 | **DONE** (7/7) — real kernel boots in-engine, inside the cage |
 | M3 sign-off gate | T67 | **partial** — CPUID policy, DMA refusal, cage done; device-set pin, I/O rate limits, fuzz owed |
 | M4 chambers, cgroups, netns | T22–T28, T63–T64 | not started — ADR 0001 settled the privileges, T63 substrate is the entry point |
@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 156 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 172 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -3632,7 +3632,7 @@ Max Concurrent: 6 (M1 wave)
   - [ ] Requesting a PCI/USB aperture on this host fails with a typed `IoMmuUnavailable` error
   - [ ] Every device parser has a fuzz target and a seed corpus
 
-- [ ] 68. **Post-Quantum Suite 2 (X25519 + ML-KEM-768, dual signatures)**
+- [x] 68. **Post-Quantum Suite 2 (X25519 + ML-KEM-768, dual signatures)**
 
   > Specification: [`docs/adr/0003-post-quantum-crypto.md`](docs/adr/0003-post-quantum-crypto.md).
   > Standards verified against primary sources: FIPS 203/204/205 (final, Aug 2024),
@@ -3654,6 +3654,35 @@ Max Concurrent: 6 (M1 wave)
   - Do not invent a combiner; follow RFC 10024.
   - Do not use Falcon or HQC: both are selected but their standards are unfinished.
   - Do not claim PQ safety for suite 1, or for suite 2 before its vectors pass.
+
+  **Done** (2026). `crates/dome-crypto/src/pq.rs`, plus suite-aware framing in
+  `crates/dome-image/src/writer.rs` and `reader.rs`. **19 new tests, 172 workspace total.**
+
+  Built on aws-lc-rs, which already exposes `kem::ML_KEM_768` and ML-DSA-65; no new
+  dependency. The hybrid follows RFC 10024's combination order (ML-KEM secret **first**),
+  then HKDF-SHA256, then AES-256-GCM seals the file key. Signatures are dual: Ed25519 and
+  ML-DSA-65, both required.
+
+  What we compose rather than cite: the wire framing and the HKDF context string, because
+  RFC 10024 specifies a TLS 1.3 handshake and this is an at-rest container. The combination
+  order and primitive choices are the RFC's. Recorded in ADR 0003.
+
+  Three findings worth keeping:
+
+  1. **The footer length is suite-dependent**, which is exactly why the suite byte exists.
+     Suite 1 is 64 bytes; suite 2 is 64 + 3309. A reader using a constant would frame a
+     suite-2 file from the wrong offset, so `signature_len_for_suite` is the only way to
+     locate it, and a test asserts the two lengths differ.
+  2. **A wrong shape in a constant is easy to miss.** The wrapped-key length omitted the
+     nonce and was 12 bytes short; the length assertion caught it immediately. Sizes in a
+     binary format should be asserted, not reasoned about.
+  3. **Downgrade and upgrade are both refused explicitly.** A suite-1 reader given a suite-2
+     file returns `UnsupportedSuite` rather than mis-parsing it, and vice versa. The tests
+     cover both directions, because a silent misread is the failure that matters.
+
+  Both signature halves are tested for tampering independently: corrupting only the ML-DSA
+  half (Ed25519 still valid) and only the Ed25519 half (ML-DSA still valid) must each be
+  rejected.
 
   **Acceptance Criteria**:
   - [ ] Vectors from the specifications pass

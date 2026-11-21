@@ -1,16 +1,36 @@
 //! Reading a `.dome` container.
 //!
-//! Order matters here and is deliberate: the signature is verified **before** any structure
-//! is parsed. Signature-first means every length, offset and count the file declares has
-//! already been authenticated, so a hostile file cannot steer the parser with unverified
-//! numbers.
+//! Order matters and is deliberate. The fixed header prefix is parsed first because its size
+//! is constant and it carries the suite byte; the footer length is then derived from that
+//! suite; the signature is verified next; and only afterwards is any length or offset the
+//! file declares believed.
 
+use dome_crypto::pq::{SUITE2_SIGNATURE_LEN, suite2_verify};
 use dome_crypto::{sha256, unseal_with_nonce, verify_manifest};
 
-use crate::format::{CHUNK_RECORD_LEN, HASH_LEN, HEADER_PREFIX_LEN, NONCE_LEN, SIGNATURE_LEN};
+use crate::format::{
+    CHUNK_RECORD_LEN, HASH_LEN, HEADER_PREFIX_LEN, NONCE_LEN, SUITE_HYBRID, signature_len_for_suite,
+};
 use crate::header::DomeHeader;
 use crate::image_error::ImageError;
 use crate::manifest::{DecodedManifest, decode_manifest};
+
+/// How to verify a container's signature.
+#[derive(Debug, Clone, Copy)]
+pub enum ContainerVerifier<'a> {
+    /// Suite 1: Ed25519 only.
+    Classical {
+        /// Ed25519 public key.
+        ed25519_public: &'a [u8],
+    },
+    /// Suite 2: Ed25519 and ML-DSA-65, both required.
+    Hybrid {
+        /// Ed25519 public key.
+        ed25519_public: &'a [u8],
+        /// ML-DSA-65 public key.
+        mldsa_public: &'a [u8],
+    },
+}
 
 /// A container that has been opened and checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,31 +41,87 @@ pub struct ReadContainer {
     pub payload: Vec<u8>,
     /// How many chunks the container holds.
     pub chunk_count: u32,
+    /// The suite the container was written with.
+    pub suite: u8,
 }
 
-/// Verify and open a container.
-///
-/// `public_key` is the Ed25519 key that signed it. Nothing is decrypted until the signature
-/// verifies, and no chunk is trusted until both its tag and its recorded hash agree.
+/// Read a suite-1 container.
 pub fn read_container(
     bytes: &[u8],
     file_key: &[u8; 32],
     public_key: &[u8],
 ) -> Result<ReadContainer, ImageError> {
-    // 1. Authenticate first.
-    if bytes.len() < HEADER_PREFIX_LEN + SIGNATURE_LEN {
+    read_container_with(
+        bytes,
+        file_key,
+        ContainerVerifier::Classical {
+            ed25519_public: public_key,
+        },
+    )
+}
+
+/// Read a container, verifying it against whichever suite it declares.
+pub fn read_container_with(
+    bytes: &[u8],
+    file_key: &[u8; 32],
+    verifier: ContainerVerifier<'_>,
+) -> Result<ReadContainer, ImageError> {
+    if bytes.len() < HEADER_PREFIX_LEN {
         return Err(ImageError::Format(crate::format::FormatError::Truncated {
-            needed: HEADER_PREFIX_LEN + SIGNATURE_LEN,
+            needed: HEADER_PREFIX_LEN,
             found: bytes.len(),
         }));
     }
 
-    let signed_len = bytes.len() - SIGNATURE_LEN;
-    let (signed, signature) = bytes.split_at(signed_len);
-    verify_manifest(signed, signature, public_key).map_err(|_| ImageError::SignatureInvalid)?;
-
-    // 2. Only now may the structure be believed.
+    // 1. The fixed prefix. Only constant offsets are read here, so nothing is trusted yet.
     let header = DomeHeader::parse(bytes)?;
+    let footer_len = signature_len_for_suite(header.suite)?;
+
+    if bytes.len() < HEADER_PREFIX_LEN + footer_len {
+        return Err(ImageError::Format(crate::format::FormatError::Truncated {
+            needed: HEADER_PREFIX_LEN + footer_len,
+            found: bytes.len(),
+        }));
+    }
+
+    // 2. Authenticate, using the suite the header declared.
+    let signed_len = bytes.len() - footer_len;
+    let (signed, signature) = bytes.split_at(signed_len);
+
+    match verifier {
+        ContainerVerifier::Classical { ed25519_public } => {
+            if header.suite == SUITE_HYBRID {
+                return Err(ImageError::Format(
+                    crate::format::FormatError::UnsupportedSuite {
+                        found: header.suite,
+                        supported: crate::format::SUITE_CLASSICAL,
+                    },
+                ));
+            }
+            verify_manifest(signed, signature, ed25519_public)
+                .map_err(|_| ImageError::SignatureInvalid)?;
+        }
+        ContainerVerifier::Hybrid {
+            ed25519_public,
+            mldsa_public,
+        } => {
+            if header.suite != SUITE_HYBRID {
+                return Err(ImageError::Format(
+                    crate::format::FormatError::UnsupportedSuite {
+                        found: header.suite,
+                        supported: SUITE_HYBRID,
+                    },
+                ));
+            }
+            if signature.len() != SUITE2_SIGNATURE_LEN {
+                return Err(ImageError::SignatureInvalid);
+            }
+            suite2_verify(signed, signature, ed25519_public, mldsa_public)
+                .map_err(|_| ImageError::SignatureInvalid)?;
+        }
+    }
+
+    // 3. Only now may declared lengths be believed.
     let manifest_start = HEADER_PREFIX_LEN;
     let manifest_end = manifest_start + header.manifest_length as usize;
 
@@ -62,7 +138,6 @@ pub fn read_container(
     )?;
     let manifest = decode_manifest(&manifest_bytes)?;
 
-    // 3. Chunk table.
     let count_start = manifest_end;
     let count_end = count_start + 4;
     if count_end > signed_len {
@@ -88,7 +163,6 @@ pub fn read_container(
 
     for index in 0..chunk_count as usize {
         let record = table_start + index * CHUNK_RECORD_LEN;
-
         let offset = read_u64(bytes, record);
         let length = read_u64(bytes, record + 8);
 
@@ -115,7 +189,6 @@ pub fn read_container(
 
         let plaintext = unseal_with_nonce(&bytes[start..end], file_key, &nonce)?;
 
-        // The tag proves the chunk is authentic; the hash proves it belongs at this index.
         if sha256(&plaintext) != hash {
             return Err(ImageError::ChunkHashMismatch { index });
         }
@@ -127,6 +200,7 @@ pub fn read_container(
         manifest,
         payload,
         chunk_count,
+        suite: header.suite,
     })
 }
 

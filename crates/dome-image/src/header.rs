@@ -22,7 +22,17 @@ impl DomeHeader {
     pub fn new(manifest_length: u32, manifest_nonce: [u8; NONCE_LEN]) -> Self {
         Self {
             version: VERSION,
-            suite: SUITE_CLASSICAL,
+            suite: crate::format::SUITE_CLASSICAL,
+            manifest_length,
+            manifest_nonce,
+        }
+    }
+
+    /// Build a header for a specific suite.
+    pub fn with_suite(manifest_length: u32, manifest_nonce: [u8; NONCE_LEN], suite: u8) -> Self {
+        Self {
+            version: VERSION,
+            suite,
             manifest_length,
             manifest_nonce,
         }
@@ -59,10 +69,11 @@ impl DomeHeader {
         }
 
         let suite = bytes[12];
-        if suite != SUITE_CLASSICAL {
+        // Both known suites are accepted; the length helpers reject anything else.
+        if suite != SUITE_CLASSICAL && suite != crate::format::SUITE_HYBRID {
             return Err(FormatError::UnsupportedSuite {
                 found: suite,
-                supported: SUITE_CLASSICAL,
+                supported: crate::format::SUITE_HYBRID,
             });
         }
 

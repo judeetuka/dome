@@ -144,16 +144,16 @@ fn an_unknown_format_byte_is_a_typed_error() {
 }
 
 #[test]
-fn the_crypto_suite_is_recorded_and_classical_is_the_only_supported_one() {
+fn the_crypto_suite_is_recorded_and_unknown_suites_are_refused() {
     let bytes = sample_header().write();
     assert_eq!(bytes[12], dome_image::format::SUITE_CLASSICAL);
 
     let mut unknown = bytes.clone();
-    unknown[12] = 2;
+    unknown[12] = 3;
     match DomeHeader::parse(&unknown) {
         Err(FormatError::UnsupportedSuite { found, supported }) => {
-            assert_eq!(found, 2);
-            assert_eq!(supported, 1);
+            assert_eq!(found, 3);
+            assert_eq!(supported, 2);
         }
         other => panic!("expected UnsupportedSuite, got {other:?}"),
     }
