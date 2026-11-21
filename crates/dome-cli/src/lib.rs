@@ -1,7 +1,124 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use dome_config::Blueprint;
 use dome_host_linux::{HostReport, ProbeRoot};
+
+/// Dome command-line entry point.
+#[derive(Debug, Parser)]
+#[command(
+    name = "dome",
+    version,
+    about = "Native-hypervisor sandbox engine. No QEMU, no WSL.",
+    after_help = "Milestone 1 is read-only. It does not create chambers, change networking, \
+                  bind devices, or require root."
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Report read-only host capability hints
+    Doctor {
+        /// Output format
+        #[arg(long, value_enum, default_value = "toml")]
+        format: OutputFormat,
+        /// Read probes from a fake host root instead of /
+        #[arg(long, value_name = "PATH")]
+        fixtures: Option<PathBuf>,
+    },
+
+    /// Parse and validate a cell blueprint
+    Validate {
+        /// Path to a .cell.toml blueprint
+        #[arg(value_name = "CELL_TOML")]
+        cell: PathBuf,
+        /// Output format
+        #[arg(long, value_enum, default_value = "toml")]
+        format: OutputFormat,
+    },
+
+    /// Launch a chamber from a blueprint (arrives in M4)
+    Run {
+        #[arg(value_name = "CELL_TOML")]
+        cell: PathBuf,
+        /// Chamber id; defaults to the blueprint's foundation-adjacent name
+        #[arg(long, value_name = "ID")]
+        name: Option<String>,
+        /// Display backend
+        #[arg(long, value_name = "MODE")]
+        display: Option<String>,
+        /// VNC port; only meaningful with --display vnc
+        #[arg(long, value_name = "PORT")]
+        vnc_port: Option<u16>,
+    },
+
+    /// Stop a running chamber (arrives in M4)
+    Stop {
+        #[arg(value_name = "CHAMBER_ID")]
+        chamber_id: String,
+    },
+
+    /// Save running chamber state to a .seal.dome (arrives in M4)
+    Seal {
+        #[arg(value_name = "CHAMBER_ID")]
+        chamber_id: String,
+        /// Output path; defaults to <chamber-id>.seal.dome
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
+
+    /// Export a chamber as a self-contained package (arrives in M4)
+    Export {
+        #[arg(value_name = "CHAMBER_ID")]
+        chamber_id: String,
+        /// Output path; required because exports are large
+        #[arg(long, value_name = "PATH", required = true)]
+        output: PathBuf,
+    },
+
+    /// Build a foundation from a recipe (arrives in M5)
+    Build {
+        /// Recipe name, for example buildroot-minimal
+        #[arg(long, value_name = "NAME", conflicts_with = "list")]
+        recipe: Option<String>,
+        /// List the available recipes
+        #[arg(long)]
+        list: bool,
+    },
+
+    /// Print the header of a .dome artifact (arrives in M2)
+    Foundation {
+        #[command(subcommand)]
+        action: FoundationAction,
+    },
+
+    /// Generate shell completions
+    #[command(hide = true)]
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum FoundationAction {
+    /// Read a .dome header without decrypting it
+    Info {
+        #[arg(value_name = "FILE_DOME")]
+        file: PathBuf,
+    },
+}
+
+/// Output format for machine-readable or human-readable text.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum OutputFormat {
+    Toml,
+    Human,
+}
 
 pub fn run_from_env() -> Result<String, CliError> {
     touch_internal_marker();
@@ -14,78 +131,152 @@ fn touch_internal_marker() {
     std::hint::black_box(marker);
 }
 
+/// Parse arguments and dispatch. Kept synchronous and panicking-free so it is
+/// directly testable without spawning a process.
 pub fn run(args: Vec<String>) -> Result<String, CliError> {
-    if args.is_empty() || args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        return Ok(help_text());
-    }
+    let argv = std::iter::once("dome".to_owned()).chain(args);
 
-    match args[0].as_str() {
-        "doctor" => run_doctor(&args[1..]),
-        command => Err(CliError::UnknownCommand(command.to_owned())),
+    match Cli::try_parse_from(argv) {
+        Ok(cli) => match cli.command {
+            Some(command) => dispatch(command),
+            None => Ok(help_text()),
+        },
+        // --help and --version are successful outcomes, not errors.
+        Err(error) => match error.kind() {
+            clap::error::ErrorKind::DisplayHelp
+            | clap::error::ErrorKind::DisplayVersion
+            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+                Ok(error.render().to_string())
+            }
+            _ => Err(CliError::Usage(error.render().to_string())),
+        },
     }
 }
 
-fn run_doctor(args: &[String]) -> Result<String, CliError> {
-    let mut format = OutputFormat::Toml;
-    let mut fixture_root = None;
-    let mut index = 0;
+fn help_text() -> String {
+    let mut command = Cli::command();
+    let mut buffer = Vec::new();
 
-    while index < args.len() {
-        match args[index].as_str() {
-            "--format" => {
-                let Some(value) = args.get(index + 1) else {
-                    return Err(CliError::MissingValue("--format"));
-                };
-                format = OutputFormat::parse(value)?;
-                index += 2;
-            }
-            "--fixtures" => {
-                let Some(path) = args.get(index + 1) else {
-                    return Err(CliError::MissingValue("--fixtures"));
-                };
-                fixture_root = Some(PathBuf::from(path));
-                index += 2;
-            }
-            flag => return Err(CliError::UnknownFlag(flag.to_owned())),
-        }
+    if command.write_long_help(&mut buffer).is_err() {
+        return "dome\n".to_owned();
     }
 
-    let report = match fixture_root {
+    String::from_utf8_lossy(&buffer).into_owned()
+}
+
+fn dispatch(command: Commands) -> Result<String, CliError> {
+    match command {
+        Commands::Doctor { format, fixtures } => Ok(run_doctor(format, fixtures)),
+
+        Commands::Validate { cell, format } => run_validate(&cell, format),
+
+        Commands::Completions { shell } => {
+            let mut buffer = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "dome", &mut buffer);
+            Ok(String::from_utf8_lossy(&buffer).into_owned())
+        }
+
+        Commands::Run { .. } => Err(CliError::NotYetImplemented("run")),
+        Commands::Stop { .. } => Err(CliError::NotYetImplemented("stop")),
+        Commands::Seal { .. } => Err(CliError::NotYetImplemented("seal")),
+        Commands::Export { .. } => Err(CliError::NotYetImplemented("export")),
+        Commands::Build { .. } => Err(CliError::NotYetImplemented("build")),
+        Commands::Foundation { .. } => Err(CliError::NotYetImplemented("foundation")),
+    }
+}
+
+fn run_doctor(format: OutputFormat, fixtures: Option<PathBuf>) -> String {
+    let report = match fixtures {
         Some(root) => HostReport::probe_root(&ProbeRoot::new(root)),
         None => HostReport::probe_host(),
     };
 
     match format {
-        OutputFormat::Toml => Ok(report.to_toml()),
-        OutputFormat::Human => Ok(report.to_human_text()),
+        OutputFormat::Toml => report.to_toml(),
+        OutputFormat::Human => report.to_human_text(),
     }
 }
 
-fn help_text() -> String {
-    concat!(
-        "dome\n\n",
-        "Commands:\n",
-        "  doctor [--format toml|human] [--fixtures PATH]  ",
-        "Report read-only host capability hints\n\n",
-        "Milestone 1 is read-only. It does not create chambers, change networking, ",
-        "bind devices, or require root."
-    )
-    .to_owned()
-}
+fn run_validate(path: &Path, format: OutputFormat) -> Result<String, CliError> {
+    let source = std::fs::read_to_string(path).map_err(|error| CliError::UnreadableFile {
+        path: path.display().to_string(),
+        reason: error.to_string(),
+    })?;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum OutputFormat {
-    Toml,
-    Human,
-}
-
-impl OutputFormat {
-    fn parse(value: &str) -> Result<Self, CliError> {
-        match value {
-            "toml" => Ok(Self::Toml),
-            "human" => Ok(Self::Human),
-            other => Err(CliError::UnknownFormat(other.to_owned())),
+    let blueprint = match Blueprint::from_toml(&source) {
+        Ok(blueprint) => blueprint,
+        Err(error) => {
+            return Err(CliError::InvalidBlueprint {
+                source_path: path.display().to_string(),
+                count: 1,
+                messages: format!("- {error}"),
+            });
         }
+    };
+
+    if let Err(errors) = blueprint.validate() {
+        let messages = errors
+            .iter()
+            .map(|error| format!("- {error}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        return Err(CliError::InvalidBlueprint {
+            source_path: path.display().to_string(),
+            count: errors.len(),
+            messages,
+        });
+    }
+
+    Ok(render_valid_blueprint(path, &blueprint, format))
+}
+
+fn render_valid_blueprint(path: &Path, blueprint: &Blueprint, format: OutputFormat) -> String {
+    let cell = blueprint.cell();
+    let limits = cell.limits();
+    let apertures = cell.apertures();
+
+    match format {
+        OutputFormat::Toml => format!(
+            concat!(
+                "[validation]\n",
+                "valid = true\n",
+                "source = \"{}\"\n",
+                "foundation = \"{}\"\n",
+                "memory_mib = {}\n",
+                "storage_mib = {}\n",
+                "cpus = {}\n",
+                "published_ports = {}\n",
+                "file_apertures = {}\n",
+                "gpio_apertures = {}\n"
+            ),
+            path.display(),
+            cell.foundation().as_str(),
+            limits.memory().as_mib(),
+            limits.storage().as_mib(),
+            limits.cpus().get(),
+            cell.ports().len(),
+            apertures.files().len(),
+            apertures.gpio().len(),
+        ),
+        OutputFormat::Human => format!(
+            concat!(
+                "blueprint: {}\n",
+                "valid\n",
+                "foundation: {}\n",
+                "limits: {} MiB memory, {} MiB storage, {} cpu(s)\n",
+                "perimeter: {} published port(s)\n",
+                "apertures: {} file, {} gpio\n"
+            ),
+            path.display(),
+            cell.foundation().as_str(),
+            limits.memory().as_mib(),
+            limits.storage().as_mib(),
+            limits.cpus().get(),
+            cell.ports().len(),
+            apertures.files().len(),
+            apertures.gpio().len(),
+        ),
     }
 }
 
@@ -99,4 +290,30 @@ pub enum CliError {
     UnknownFlag(String),
     #[error("unknown output format: {0}")]
     UnknownFormat(String),
+    #[error("{0}")]
+    Usage(String),
+    #[error("`{0}` is not implemented yet; see PLAN.md for the milestone that adds it")]
+    NotYetImplemented(&'static str),
+    #[error("cannot read {path}: {reason}")]
+    UnreadableFile { path: String, reason: String },
+    #[error("{source_path}: {count} problem(s) found\n{messages}")]
+    InvalidBlueprint {
+        source_path: String,
+        count: usize,
+        messages: String,
+    },
+}
+
+impl CliError {
+    /// Process exit code for this error, per docs/cli-contract.md.
+    ///
+    /// 2 = usage, 3 = validation. Codes 4 (capability missing) and 5 (engine failure)
+    /// are reserved for the engine work in M3/M4 and cannot be produced yet.
+    #[must_use]
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Self::InvalidBlueprint { .. } | Self::UnreadableFile { .. } => 3,
+            _ => 2,
+        }
+    }
 }

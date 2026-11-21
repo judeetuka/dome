@@ -333,7 +333,7 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T2: tokio deferral decision — runtime lands in M4 [quick]
 ├── T3: Error architecture (thiserror per crate) [DONE]
 ├── T4: Serde + TOML parsing (dome-config read path) [DONE]
-├── T5: CLI migration to clap [unspecified-high]
+├── T5: CLI migration to clap [DONE, incl. validate]
 ├── T6: Blueprint validation rules [DONE]
 ├── T7: Wire dome-device into dome-host-linux [quick]
 ├── T8: dome-test-utils crate [quick]
@@ -779,50 +779,40 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-cli/tests/cli.rs:13-23` — `doctor_defaults_to_toml()` test that must not break
   - `crates/dome-cli/tests/cli.rs:4-9` — `help_mentions_read_only_milestone()` test
 
+  **Completed** (2026). `dome-cli` now parses with clap 4 derive. All 15 CLI tests pass,
+  including the two pre-existing ones unmodified.
+
+  Three deliberate departures from the text above, all required by
+  [`docs/cli-contract.md`](docs/cli-contract.md), which T61 made authoritative over this
+  plan:
+
+  - **`doctor --format toml` is no longer byte-identical.** It now begins with
+    `schema_version = 1` because contract section 4 makes the TOML report a stable,
+    versioned contract. This overrides the "must not change doctor behaviour" guardrail,
+    and it supersedes the old QA assertion that output *starts with* `[platform]`.
+  - **Exit codes are now real.** `main.rs` maps `CliError::exit_code()`: `2` for usage
+    errors, `3` for invalid blueprints and unreadable files. Codes `4` (capability
+    missing) and `5` (engine failure) are reserved and unreachable until M3/M4.
+  - **clap errors map to a single `CliError::Usage` variant.** The original
+    `MissingValue`/`UnknownCommand`/`UnknownFlag`/`UnknownFormat` variants are kept
+    because `crates/dome-cli/tests/error_messages.rs` pins their messages, but parsing no
+    longer produces them. Recording this so nobody "fixes" the dead variants later.
+
+  Also: `foundation` became a nested subcommand (`dome foundation info <file>`) to match
+  the contract, and `completions` is implemented for real via `clap_complete` rather than
+  stubbed. Stub commands return `NotYetImplemented` and exit `2` — they are declared with
+  their full contract flags (`--display`, `--vnc-port`, `--output`) so the grammar is
+  frozen before the behaviour lands.
+
   **Acceptance Criteria**:
-  - [ ] `cargo run -p dome-cli -- doctor --format toml` works identically
-  - [ ] `cargo run -p dome-cli -- --help` shows all subcommands
-  - [ ] `cargo run -p dome-cli -- --version` prints version
-  - [ ] Existing CLI tests pass unchanged
-  - [ ] `cargo run -p dome-cli -- validate --help` shows validation help (stub)
-
-  **QA Scenarios**:
-  ```
-  Scenario: Doctor command works identically after clap migration
-    Tool: interactive_bash (tmux)
-    Steps:
-      1. Run: cargo run -p dome-cli -- doctor --format toml
-      2. Assert: output starts with "[platform]"
-      3. Assert: output contains "native_engine_device_available"
-      4. Assert: exit code is 0
-    Expected Result: Identical output to pre-clap version
-    Evidence: evidence/task-5-clap-doctor.txt
-
-  Scenario: Help output shows all commands
-    Tool: interactive_bash (tmux)
-    Steps:
-      1. Run: cargo run -p dome-cli -- --help
-      2. Assert: output contains "doctor"
-      3. Assert: output contains "validate"
-      4. Assert: output contains "run" (stub)
-    Expected Result: Complete help text with all subcommands
-    Evidence: evidence/task-5-clap-help.txt
-
-  Scenario: Unknown command produces error
-    Tool: interactive_bash (tmux)
-    Steps:
-      1. Run: cargo run -p dome-cli -- nonexistent
-      2. Assert: stderr contains error message
-      3. Assert: exit code is non-zero
-    Expected Result: Graceful error for unknown command
-    Evidence: evidence/task-5-clap-error.txt
-  ```
-
-  **Commit**: YES
-  - Message: `feat(m1): migrate CLI to clap with derive API`
-  - Files: `crates/dome-cli/Cargo.toml`, `crates/dome-cli/src/lib.rs`, `crates/dome-cli/src/main.rs`
-
----
+  - [x] `dome doctor --format toml` works (now versioned by `schema_version`)
+  - [x] `dome --help` lists every subcommand
+  - [x] `dome --version` prints `dome 0.1.0`
+  - [x] Existing CLI tests pass unchanged
+  - [x] `dome validate --help` and `dome run --help` show their flags
+  - [x] `dome validate` is implemented, not stubbed, and reports all faults with exit 3
+  - [x] `dome completions bash|zsh|fish|powershell|elvish` generates real completions
+  - [x] `completions` stays hidden from `--help`
 
 - [ ] 6. **Blueprint Validation Rules**
 

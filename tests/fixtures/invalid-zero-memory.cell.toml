@@ -1,0 +1,8 @@
+# Invalid: memory below the 64 MiB minimum.
+[cell]
+foundation = "dome/buildroot:minimal"
+
+[limits]
+memory_mib = 0
+storage_mib = 32
+cpus = 0

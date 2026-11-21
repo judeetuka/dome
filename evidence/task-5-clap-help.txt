@@ -1,0 +1,26 @@
+# T5 — top-level help
+# command: dome --help
+
+Native-hypervisor sandbox engine. No QEMU, no WSL.
+
+Usage: dome [COMMAND]
+
+Commands:
+  doctor      Report read-only host capability hints
+  validate    Parse and validate a cell blueprint
+  run         Launch a chamber from a blueprint (arrives in M4)
+  stop        Stop a running chamber (arrives in M4)
+  seal        Save running chamber state to a .seal.dome (arrives in M4)
+  export      Export a chamber as a self-contained package (arrives in M4)
+  build       Build a foundation from a recipe (arrives in M5)
+  foundation  Print the header of a .dome artifact (arrives in M2)
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Milestone 1 is read-only. It does not create chambers, change networking, bind devices, or require root.
+
+
+EXIT: 0

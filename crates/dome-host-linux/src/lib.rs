@@ -93,9 +93,16 @@ impl HostReport {
         }
     }
 
+    /// Schema version of the `--format toml` report.
+    ///
+    /// Part of the CLI contract: consumers may add keys within a schema version but
+    /// never rename one. See docs/cli-contract.md section 4.
+    pub const SCHEMA_VERSION: u32 = 1;
+
     pub fn to_toml(&self) -> String {
         format!(
             concat!(
+                "schema_version = {}\n\n",
                 "[platform]\n",
                 "kernel_version = {}\n\n",
                 "[virtualization]\n",
@@ -117,6 +124,7 @@ impl HostReport {
                 "gnu_as_available = {}\n",
                 "nasm_available = {}"
             ),
+            Self::SCHEMA_VERSION,
             toml_option_string(self.platform.kernel_version.as_deref()),
             self.virtualization.cpu_virtualization_flag,
             self.virtualization.kvm_device_available,

@@ -1,0 +1,30 @@
+# T5 — error paths and exit codes (docs/cli-contract.md section 2)
+
+$ dome nonexistent
+exit=2
+error: unrecognized subcommand 'nonexistent'
+
+Usage: dome [COMMAND]
+
+For more information, try '--help'.
+
+$ dome doctor --format yaml
+exit=2
+error: invalid value 'yaml' for '--format <FORMAT>'
+  [possible values: toml, human]
+
+For more information, try '--help'.
+
+$ dome export chamber-1
+exit=2
+error: the following required arguments were not provided:
+  --output <PATH>
+
+Usage: dome export --output <PATH> <CHAMBER_ID>
+
+For more information, try '--help'.
+
+$ dome run tests/fixtures/valid.cell.toml
+exit=2
+`run` is not implemented yet; see PLAN.md for the milestone that adds it
+

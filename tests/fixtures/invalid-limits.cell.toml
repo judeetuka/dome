@@ -1,0 +1,26 @@
+# Invalid at the rule level (not at construction): limits below minimums, a
+# blocked aperture path and a duplicate published port. Must report 4 problems.
+[cell]
+foundation = "dome/buildroot:minimal"
+
+[limits]
+memory_mib = 32
+storage_mib = 64
+cpus = 1
+
+[[perimeter.ports]]
+host_addr = "127.0.0.1"
+host_port = 8080
+guest_port = 80
+protocol = "tcp"
+
+[[perimeter.ports]]
+host_addr = "127.0.0.1"
+host_port = 8080
+guest_port = 8080
+protocol = "tcp"
+
+[[apertures.files]]
+host = "/proc/self"
+guest = "/proc"
+mode = "read-only"

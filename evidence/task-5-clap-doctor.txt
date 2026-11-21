@@ -1,0 +1,37 @@
+# T5 — doctor after the clap migration
+# command: dome doctor --format toml
+# NOTE: output now begins with schema_version = 1 (docs/cli-contract.md section 4),
+# so the old "starts with [platform]" assertion is superseded.
+
+schema_version = 1
+
+[platform]
+kernel_version = "7.3.5-zen1-1-zen"
+
+[virtualization]
+cpu_virtualization_flag = true
+native_engine_device_available = false
+
+[iommu]
+groups_detected = false
+
+[vfio]
+device_available = false
+module_loaded = false
+
+[cgroups]
+v2_available = true
+
+[security]
+seccomp_visible = true
+landlock_visible = false
+
+[network]
+namespace_visible = true
+
+[assembler]
+gnu_as_available = true
+nasm_available = false
+
+
+EXIT: 0

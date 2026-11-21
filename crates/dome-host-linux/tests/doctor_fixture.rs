@@ -28,6 +28,7 @@ fn renders_toml_capabilities() {
     let report = HostReport::probe_root(&root);
     let output = report.to_toml();
 
+    assert!(output.contains("schema_version = 1"));
     assert!(output.contains("[platform]"));
     assert!(output.contains("kernel_version = \"6.10.0-dome-fixture\""));
     assert!(output.contains("native_engine_device_available = true"));

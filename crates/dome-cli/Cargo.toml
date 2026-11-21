@@ -10,6 +10,9 @@ name = "dome"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+dome-config = { path = "../dome-config" }
 thiserror = { workspace = true }
 dome-host-linux = { path = "../dome-host-linux" }
 dome-obfuscation = { path = "../dome-obfuscation" }
