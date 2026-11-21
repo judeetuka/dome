@@ -433,7 +433,7 @@ Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
 ├── T27: Chamber export [DONE — package format; export/import verbs owed]
 ├── T28: M4 integration tests (enforcement, conflict, cleanup) [DONE — release loop + chamber lifecycle]
 ├── T63: Virtio substrate (UART + virtio-mmio + initramfs path) [DONE]
-├── T64: Content-addressed foundation store + CoW overlays
+├── T64: Content-addressed foundation store + CoW overlays [DONE — M4 COMPLETE]
 └── T69: Restart policy + host-restart reconciliation [DONE]
 
 Wave M5 (Minimal OS Builder — 4 tasks, 2 parallel):
@@ -3753,7 +3753,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 64. **Content-Addressed Foundation Store + CoW Overlays**
+- [x] 64. **Content-Addressed Foundation Store + CoW Overlays**
 
   **What to do**:
   - `dome-image/src/store.rs`: host-local store keyed by foundation digest under
@@ -3770,6 +3770,30 @@ Max Concurrent: 6 (M1 wave)
   - Do not dedupe across architectures — the digest includes the target arch (T65)
 
   **Parallelization**: Can Run In Parallel: YES with T65. **Blocked By**: T12, T13.
+
+  > **Done.** `crates/dome-image/src/store.rs`, ten tests, plus `dome foundation list`
+  > and `dome foundation prune`.
+  >
+  > A foundation is stored once under a digest of its bytes **and its architecture**: the same
+  > recipe produces different bytes per target, and silently serving an aarch64 image to an
+  > x86_64 chamber fails in a way that is hard to diagnose later.
+  >
+  > **The honest finding.** The CoW half depends on the filesystem, and this host's `/` is
+  > **ext4**, which cannot share extents. So layers here are full copies, and the store reports
+  > `strategy: copy` rather than implying the good case. On btrfs, xfs or zfs the same call
+  > returns `strategy: reflink` and layers cost no additional blocks. The test asserts whichever
+  > is true instead of asserting the one that would look better.
+  >
+  > What works everywhere, regardless of filesystem: **identity dedupe**. N chambers from one
+  > foundation still store exactly one copy of it, with per-chamber references. The saving that
+  > needs reflink is the writable layer, not the sharing.
+  >
+  > Inserts copy to a temporary name and rename into place, so a half-written image is never
+  > visible under a digest it does not match. Chamber names are sanitised before becoming file
+  > names, and a test tries `../../escape` to prove it cannot leave the store.
+  >
+  > `dome-crypto` gained a streaming SHA-256, because digesting a 400 MB foundation must not
+  > mean allocating 400 MB.
 
   **Acceptance Criteria**:
   - [ ] Two chambers from one foundation use one foundation's worth of disk
