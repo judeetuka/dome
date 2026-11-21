@@ -425,7 +425,7 @@ Wave M3 (Linux Native Engine — 7 tasks) — COMPLETE:
 └── T21: M3 integration tests (capability, failure, minimal boot) [DONE — M3 COMPLETE]
 
 Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
-├── T22: cgroups v2 integration (per-chamber cgroup) [deep]
+├── T22: cgroups v2 integration [DONE]
 ├── T23: Network namespace integration (per-chamber netns) [deep]
 ├── T24: Chamber create orchestrator [deep]
 ├── T25: Chamber run/stop lifecycle [deep]
@@ -1986,7 +1986,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Insufficient memory and a missing kernel are typed errors
   - [x] Five tests, no sleeps beyond the time limit under test
 
-- [ ] 22. **cgroups v2 Integration (per-chamber cgroup)**
+- [x] 22. **cgroups v2 Integration (per-chamber cgroup)**
 
   **What to do**:
   - Add `cgroups-rs = "0.5"` to `dome-supervisor/Cargo.toml`
@@ -2006,6 +2006,34 @@ Max Concurrent: 6 (M1 wave)
   **Recommended Agent Profile**: `deep` — systems programming, resource isolation
   **Parallelization**: Can Run In Parallel YES with T23 | Blocks: T24 | Blocked By: M3 complete
   **References**: `cgroups-rs` docs — `CgroupBuilder`, `UnifiedHierarchy`; `crates/dome-core/src/lib.rs:117-144` — `ResourceLimits`
+
+  **Done** (2026). `crates/dome-supervisor/src/cgroup.rs`. **Six tests, run against the
+  real kernel on this host.**
+
+  Probed before building, as ADR 0001 predicted: our cgroup is
+  `/user.slice/user-1000.slice/<user service>/app.slice/...scope`, the delegated service
+  subtree lists `cpu memory pids`, and creating a child cgroup plus writing `pids.max`
+  works as uid 1000. **No privilege was needed at any point.**
+
+  Deviation from the plan, recorded: no `cgroups-rs` dependency. The v2 interface is a
+  directory of text files, so the module writes them directly — identical behaviour, one
+  fewer dependency, and an error names the exact file that refused the write.
+
+  What it does: creates `<delegated>/dome/chambers/<id>`, writes `memory.max` in bytes,
+  `cpu.max` as "quota period" from the CPU count, and `pids.max` scaled to CPUs with a
+  floor of 64. `attach_process` writes to `cgroup.procs`; `destroy` writes `cgroup.kill`
+  before removing the directory, because a cgroup with live processes cannot be removed.
+
+  Security detail that a test covers: **chamber ids are user input**, so anything outside
+  `[A-Za-z0-9._-]`, longer than 64, or starting with a dot is refused rather than rewritten.
+  Interpolating a hostile id into a path would escape the delegated subtree.
+
+  **Acceptance Criteria**:
+  - [x] Cgroup created with correct memory, CPU and PID limits, verified by reading files
+  - [x] `attach_process` places a real process in `cgroup.procs`
+  - [x] `destroy` removes the directory
+  - [x] Unsafe chamber ids are refused, not sanitised into something unexpected
+  - [x] Absence of a delegated subtree is a typed error, not a panic
 
   **Acceptance Criteria**:
   - [ ] Chamber cgroup created with correct memory/CPU/PID limits

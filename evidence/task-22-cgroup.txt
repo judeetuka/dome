@@ -1,0 +1,15 @@
+# T22 — per-chamber cgroups v2
+# command: cargo test -p dome-supervisor -j4
+
+test the_delegated_root_is_inside_the_cgroup_hierarchy ... ok
+test limits_are_written_to_the_kernel ... ok
+test more_cpus_raise_both_the_cpu_and_process_limits ... ok
+test a_process_can_be_attached ... ok
+test destroy_removes_the_directory ... ok
+test an_unsafe_chamber_id_is_refused ... ok
+
+# delegated subtree probed:
+#   cgroup.controllers: cpu memory pids
+#   mkdir + pids.max write as uid 1000: ok
+#   memory.max written: 67108864
+#   cpu.max written: 100000 100000

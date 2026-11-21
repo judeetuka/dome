@@ -1,3 +1,5 @@
+pub mod cgroup;
+
 use dome_core::ChamberId;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
