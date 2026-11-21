@@ -22,6 +22,31 @@ pub struct DeviceCandidate {
     readiness: PassthroughReadiness,
 }
 
+impl DeviceClass {
+    /// Stable wire name used in reports and blueprints.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gpu => "gpu",
+            Self::UsbController => "usb-controller",
+            Self::NetworkCard => "network-card",
+            Self::StorageController => "storage-controller",
+            Self::PciOther => "pci-other",
+        }
+    }
+}
+
+impl PassthroughReadiness {
+    /// Stable wire name used in reports and blueprints.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::MissingIommu => "missing-iommu",
+            Self::UnsafeIommuGroup => "unsafe-iommu-group",
+            Self::ReadyForExplicitOptIn => "ready-for-explicit-opt-in",
+        }
+    }
+}
+
 impl DeviceCandidate {
     pub fn new(
         class: DeviceClass,

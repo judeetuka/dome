@@ -3,6 +3,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use dome_device::{DeviceCandidate, DeviceClass, PassthroughReadiness};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeRoot {
     root: PathBuf,
@@ -37,6 +39,23 @@ impl ProbeRoot {
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false)
     }
+
+    /// Sorted entry names of a directory, or empty when it cannot be read.
+    ///
+    /// Sorted so probe output is stable across runs and comparable in tests.
+    fn read_dir_names(&self, path: &str) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(self.path(path)) else {
+            return Vec::new();
+        };
+
+        let mut names: Vec<String> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+
+        names.sort();
+        names
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +68,7 @@ pub struct HostReport {
     pub security: SecurityReport,
     pub network: NetworkReport,
     pub assembler: AssemblerReport,
+    pub devices: DeviceReport,
 }
 
 impl HostReport {
@@ -90,6 +110,7 @@ impl HostReport {
                 gnu_as_available: executable_in_path("as"),
                 nasm_available: executable_in_path("nasm"),
             },
+            devices: probe_devices(root),
         }
     }
 
@@ -100,7 +121,7 @@ impl HostReport {
     pub const SCHEMA_VERSION: u32 = 1;
 
     pub fn to_toml(&self) -> String {
-        format!(
+        let mut output = format!(
             concat!(
                 "schema_version = {}\n\n",
                 "[platform]\n",
@@ -137,11 +158,35 @@ impl HostReport {
             self.network.namespace_visible,
             self.assembler.gnu_as_available,
             self.assembler.nasm_available,
-        )
+        );
+
+        output.push_str("\n\n[devices]\n");
+        output.push_str(&format!(
+            "vfio_device_count = {}\nvfio_devices = [{}]\n",
+            self.devices.vfio_devices.len(),
+            self.devices
+                .vfio_devices
+                .iter()
+                .map(|name| format!("\"{}\"", escape_toml(name)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+
+        for candidate in &self.devices.candidates {
+            output.push_str("\n[[devices.candidates]]\n");
+            output.push_str(&format!(
+                "class = \"{}\"\nsysfs_path = \"{}\"\nreadiness = \"{}\"\n",
+                candidate.class().as_str(),
+                escape_toml(candidate.sysfs_path()),
+                candidate.readiness().as_str()
+            ));
+        }
+
+        output
     }
 
     pub fn to_human_text(&self) -> String {
-        format!(
+        let mut output = format!(
             concat!(
                 "Dome host capability report\n",
                 "kernel: {}\n",
@@ -167,7 +212,15 @@ impl HostReport {
             yes_no(self.network.namespace_visible),
             yes_no(self.assembler.gnu_as_available),
             yes_no(self.assembler.nasm_available),
-        )
+        );
+
+        output.push_str(&format!(
+            "\ndevices: {}\nvfio nodes: {}",
+            self.devices.candidates.len(),
+            self.devices.vfio_devices.len()
+        ));
+
+        output
     }
 }
 
@@ -209,10 +262,108 @@ pub struct NetworkReport {
     pub namespace_visible: bool,
 }
 
+/// PCI devices visible to the host, with enough context to judge passthrough safety.
+///
+/// This is read-only reconnaissance: nothing is bound, unbound or reserved. A
+/// candidate marked `ReadyForExplicitOptIn` still requires an explicit aperture in the
+/// cell blueprint before Dome will touch it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DeviceReport {
+    pub candidates: Vec<DeviceCandidate>,
+    pub vfio_devices: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssemblerReport {
     pub gnu_as_available: bool,
     pub nasm_available: bool,
+}
+
+const PCI_DEVICES: &str = "/sys/bus/pci/devices";
+const IOMMU_GROUPS: &str = "/sys/kernel/iommu_groups";
+const VFIO_DIR: &str = "/dev/vfio";
+
+fn probe_devices(root: &ProbeRoot) -> DeviceReport {
+    let mut candidates: Vec<DeviceCandidate> = Vec::new();
+    let mut grouped: Vec<String> = Vec::new();
+
+    // A device is only isolated if it sits alone in its IOMMU group. Sharing a group
+    // with another device means that device can DMA into the same memory, which is why
+    // shared groups are reported as unsafe rather than ready.
+    for group in root.read_dir_names(IOMMU_GROUPS) {
+        let addresses = root.read_dir_names(&format!("{IOMMU_GROUPS}/{group}/devices"));
+        let shared_group = addresses.len() > 1;
+
+        for address in addresses {
+            grouped.push(address.clone());
+            let readiness = if shared_group {
+                PassthroughReadiness::UnsafeIommuGroup
+            } else {
+                PassthroughReadiness::ReadyForExplicitOptIn
+            };
+            candidates.push(build_candidate(root, &address, readiness));
+        }
+    }
+
+    for address in root.read_dir_names(PCI_DEVICES) {
+        if grouped.contains(&address) {
+            continue;
+        }
+        candidates.push(build_candidate(
+            root,
+            &address,
+            PassthroughReadiness::MissingIommu,
+        ));
+    }
+
+    candidates.sort_by(|left, right| left.sysfs_path().cmp(right.sysfs_path()));
+
+    // "/dev/vfio/vfio" is the control node, not a device.
+    let mut vfio_devices = root.read_dir_names(VFIO_DIR);
+    vfio_devices.retain(|name| name != "vfio");
+
+    DeviceReport {
+        candidates,
+        vfio_devices,
+    }
+}
+
+fn build_candidate(
+    root: &ProbeRoot,
+    address: &str,
+    readiness: PassthroughReadiness,
+) -> DeviceCandidate {
+    let class = root
+        .read_to_string(&format!("{PCI_DEVICES}/{address}/class"))
+        .map(|raw| classify_pci_class(&raw))
+        .unwrap_or(DeviceClass::PciOther);
+
+    DeviceCandidate::new(class, format!("{PCI_DEVICES}/{address}"), readiness)
+}
+
+/// Map a sysfs `class` value to a device class.
+///
+/// sysfs reports the 24-bit PCI class as `0xBBSSPP` where BB is the base class, so the
+/// base class is the top byte. Anything unparseable degrades to `PciOther` rather than
+/// failing the whole probe: one odd device must not blind the report.
+fn classify_pci_class(raw: &str) -> DeviceClass {
+    let trimmed = raw.trim();
+    let digits = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+
+    let Ok(value) = u32::from_str_radix(digits, 16) else {
+        return DeviceClass::PciOther;
+    };
+
+    match (value >> 16) & 0xff {
+        0x01 => DeviceClass::StorageController,
+        0x02 => DeviceClass::NetworkCard,
+        0x03 => DeviceClass::Gpu,
+        0x0c => DeviceClass::UsbController,
+        _ => DeviceClass::PciOther,
+    }
 }
 
 fn has_virtualization_flag(cpuinfo: &str) -> bool {

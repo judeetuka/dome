@@ -335,7 +335,7 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T4: Serde + TOML parsing (dome-config read path) [DONE]
 ├── T5: CLI migration to clap [DONE, incl. validate]
 ├── T6: Blueprint validation rules [DONE]
-├── T7: Wire dome-device into dome-host-linux [quick]
+├── T7: Wire dome-device into dome-host-linux [DONE]
 ├── T8: dome-test-utils crate [quick]
 └── T9: M1 integration tests + round-trip validation [unspecified-high]
 
@@ -905,28 +905,34 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-host-linux/src/lib.rs:72-78` — Current IOMMU/VFIO probes
   - `crates/dome-host-linux/src/lib.rs:96-133` — `to_toml()` method to extend
 
+  **Completed** (2026). `doctor` now reports PCI candidates and VFIO nodes. All
+  probing is read-only: nothing is bound, unbound or reserved.
+
+  Decisions worth knowing:
+
+  - **Readiness is derived from IOMMU group density, not from a checklist.** A device alone
+    in its group is `ready-for-explicit-opt-in`; a device sharing a group is
+    `unsafe-iommu-group` because a neighbour can DMA into the same memory; a device with no
+    group is `missing-iommu`. That single distinction is what the M7 threat model will
+    depend on, so it is computed here rather than asserted later.
+  - **PCI class parsing degrades instead of failing.** sysfs reports `0xBBSSPP`; the top
+    byte selects the class. An unparseable class becomes `pci-other` rather than aborting
+    the probe — one odd device must not blind the whole report.
+  - **`/dev/vfio/vfio` is excluded** from the device list because it is the control node,
+    not a passthrough device.
+  - **Results are sorted by sysfs path** so report output is stable across runs and
+    comparable in tests.
+  - Adding a `[devices]` table is an additive change under `schema_version = 1`, which
+    docs/cli-contract.md section 4 permits.
+
   **Acceptance Criteria**:
-  - [ ] `dome-host-linux` depends on `dome-device`
-  - [ ] `HostReport` includes device candidates
-  - [ ] `doctor --format toml` output includes `[devices]` section when VFIO is available
-  - [ ] Existing `doctor_fixture.rs` tests still pass
-  - [ ] Devices are classified with correct `PassthroughReadiness`
-
-  **QA Scenarios**:
-  ```
-  Scenario: Device candidates appear in TOML output
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-host-linux --test doctor_fixture 2>&1
-      2. Assert: fixture test passes
-      3. Assert: rendered TOML contains device entries when VFIO available
-    Expected Result: Device enumeration works with fixture data
-    Evidence: evidence/task-7-device-toml.txt
-  ```
-
-  **Commit**: NO (groups with T1, T2, T3, T8)
-
----
+  - [x] `dome-device` is a dependency of `dome-host-linux`
+  - [x] IOMMU groups enumerated into `DeviceCandidate` values with a class and readiness
+  - [x] PCI classes read from sysfs (GPU, network, storage, USB, other)
+  - [x] VFIO devices enumerated from `/dev/vfio/`, control node excluded
+  - [x] Reported in both `--format toml` (`[devices]`) and `--format human`
+  - [x] Probes stay read-only; no device is bound or reserved
+  - [x] Fixture covers isolated, shared and group-less devices (5 host tests)
 
 - [ ] 8. **dome-test-utils Crate**
 

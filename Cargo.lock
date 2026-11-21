@@ -169,6 +169,9 @@ version = "0.1.0"
 [[package]]
 name = "dome-host-linux"
 version = "0.1.0"
+dependencies = [
+ "dome-device",
+]
 
 [[package]]
 name = "dome-image"

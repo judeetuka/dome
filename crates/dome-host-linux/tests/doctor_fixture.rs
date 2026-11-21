@@ -38,3 +38,65 @@ fn fixture_root() -> ProbeRoot {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     ProbeRoot::new(manifest_dir.join("../../tests/fixtures/linux-host"))
 }
+
+#[test]
+fn reports_pci_candidates_with_passthrough_readiness() {
+    let report = HostReport::probe_root(&fixture_root());
+
+    let summary: Vec<(String, &str, &str)> = report
+        .devices
+        .candidates
+        .iter()
+        .map(|candidate| {
+            (
+                candidate.sysfs_path().to_owned(),
+                candidate.class().as_str(),
+                candidate.readiness().as_str(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        summary,
+        vec![
+            (
+                "/sys/bus/pci/devices/0000:01:00.0".to_owned(),
+                "gpu",
+                "ready-for-explicit-opt-in"
+            ),
+            (
+                "/sys/bus/pci/devices/0000:02:00.0".to_owned(),
+                "network-card",
+                "unsafe-iommu-group"
+            ),
+            (
+                "/sys/bus/pci/devices/0000:02:00.1".to_owned(),
+                "usb-controller",
+                "unsafe-iommu-group"
+            ),
+            (
+                "/sys/bus/pci/devices/0000:03:00.0".to_owned(),
+                "storage-controller",
+                "missing-iommu"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn vfio_control_node_is_not_a_device() {
+    let report = HostReport::probe_root(&fixture_root());
+
+    assert_eq!(report.devices.vfio_devices, vec!["42".to_owned()]);
+}
+
+#[test]
+fn renders_devices_as_toml() {
+    let output = HostReport::probe_root(&fixture_root()).to_toml();
+
+    assert!(output.contains("[devices]"));
+    assert!(output.contains("vfio_devices = [\"42\"]"));
+    assert!(output.contains("[[devices.candidates]]"));
+    assert!(output.contains("class = \"gpu\""));
+    assert!(output.contains("readiness = \"unsafe-iommu-group\""));
+}

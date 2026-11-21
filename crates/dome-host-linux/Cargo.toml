@@ -5,5 +5,8 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+dome-device = { path = "../dome-device" }
+
 [lints]
 workspace = true

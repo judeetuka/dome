@@ -1,0 +1,59 @@
+# T7 — dome-device wired into the host probe
+# command: dome doctor --fixtures tests/fixtures/linux-host
+
+schema_version = 1
+
+[platform]
+kernel_version = "6.10.0-dome-fixture"
+
+[virtualization]
+cpu_virtualization_flag = true
+native_engine_device_available = true
+
+[iommu]
+groups_detected = true
+
+[vfio]
+device_available = true
+module_loaded = true
+
+[cgroups]
+v2_available = true
+
+[security]
+seccomp_visible = true
+landlock_visible = true
+
+[network]
+namespace_visible = true
+
+[assembler]
+gnu_as_available = true
+nasm_available = false
+
+[devices]
+vfio_device_count = 1
+vfio_devices = ["42"]
+
+[[devices.candidates]]
+class = "gpu"
+sysfs_path = "/sys/bus/pci/devices/0000:01:00.0"
+readiness = "ready-for-explicit-opt-in"
+
+[[devices.candidates]]
+class = "network-card"
+sysfs_path = "/sys/bus/pci/devices/0000:02:00.0"
+readiness = "unsafe-iommu-group"
+
+[[devices.candidates]]
+class = "usb-controller"
+sysfs_path = "/sys/bus/pci/devices/0000:02:00.1"
+readiness = "unsafe-iommu-group"
+
+[[devices.candidates]]
+class = "storage-controller"
+sysfs_path = "/sys/bus/pci/devices/0000:03:00.0"
+readiness = "missing-iommu"
+
+
+EXIT: 0
