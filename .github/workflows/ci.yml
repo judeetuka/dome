@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  verify:
+    name: verify (fmt, check, test, clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cache
+        uses: Swatinem/rust-cache@v2
+
+      # Every cargo invocation is capped at -j4 by project rule.
+      - name: fmt
+        run: cargo fmt --check
+
+      - name: check
+        run: cargo check --workspace -j4
+
+      - name: test
+        run: cargo test --workspace -j4
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -j4 -- -D warnings
+
+      # Records what this runner can actually do. GitHub runners have no /dev/kvm,
+      # so engine boot tests stay #[ignore]d here (see PLAN.md Revision 2 section 1).
+      - name: capability snapshot
+        run: |
+          mkdir -p evidence
+          cargo run -q -p dome-cli -- doctor --format toml | tee evidence/ci-doctor.toml
+
+      - name: upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence/
+          if-no-files-found: warn
+
+  msrv:
+    name: msrv (declared rust-version)
+    runs-on: ubuntu-latest
+    # Soft-fail while we learn whether the declared MSRV still builds.
+    # Tighten to a required check once it is known-green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: read declared rust-version
+        id: msrv
+        run: |
+          version="$(grep '^rust-version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          if [ -z "$version" ]; then
+            echo "no rust-version declared in Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "declared MSRV: $version"
+
+      - name: install MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - name: cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: check on MSRV
+        run: cargo check --workspace -j4

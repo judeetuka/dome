@@ -321,7 +321,7 @@ Wave M0.5 (unblocked, can overlap Wave 0):
 └── T63: virtio device substrate — 16550 UART + initramfs boot path [deep]  ← GATES T19, T21, T36, T38
 
 Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
-├── T1: CI pipeline (GitHub Actions) [quick]
+├── T1: CI pipeline (GitHub Actions) [DONE]
 ├── T2: tokio deferral decision — runtime lands in M4 [quick]
 ├── T3: Error architecture (thiserror per crate) [quick]
 ├── T4: Serde + TOML parsing (dome-config read path) [unspecified-high]
@@ -489,10 +489,27 @@ Max Concurrent: 6 (M1 wave)
   - `rust-toolchain.toml` — MSRV and components to validate
   - `.rules/rust.md` — Verification baseline commands
 
+  **Completed** (2026): `.github/workflows/ci.yml` written. Validated locally as real YAML
+  (parsed with `yaml@2`, no duplicate keys) and every command was run by hand to confirm
+  the exact invocation works, including the MSRV extraction.
+
+  Two deliberate choices worth reviewing:
+
+  - **Every cargo call carries `-j4`**, per the project's global build rule. It is a no-op
+    on a 2-core GitHub runner but keeps CI and local identical.
+  - **The MSRV job is `continue-on-error: true`** for now. The declared floor is `1.95` and
+    nobody has proven the workspace still builds there. Soft-fail first, tighten once we
+    know. Do not delete the job — a silently rotting MSRV is worse than a red check.
+
+  The `verify` job also captures `doctor --format toml` into `evidence/ci-doctor.toml` and
+  uploads it as an artifact. GitHub runners have no `/dev/kvm`, so the artifact doubles as
+  the record of exactly which capabilities CI lacked when a boot test was skipped.
+
   **Acceptance Criteria**:
-  - [ ] `.github/workflows/ci.yml` exists with correct trigger events
-  - [ ] CI runs all 4 verification commands
-  - [ ] `cargo check --workspace` passes in CI (verify via `gh act` or test push)
+  - [x] `.github/workflows/ci.yml` exists with correct trigger events (push/PR to `main`)
+  - [x] CI runs all 4 verification commands, in the documented order
+  - [x] Workflow parses as valid YAML; commands verified locally
+  - [ ] `cargo check --workspace` passes in CI — requires the first push to confirm
 
   **QA Scenarios**:
   ```
