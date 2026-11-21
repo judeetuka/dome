@@ -106,7 +106,7 @@ own kernel image (11.7 MB) from a profile (T31) with the devices this engine act
 virtio-mmio, a 16550 UART — compiled in. There are no modules, because there is no hardware to
 have modules for. That single decision is worth more than every package choice combined.
 
-### Two stages: build tools never reach the release
+### Sections, because one list answers three questions
 
 Compiling needs a toolchain; running does not. A recipe therefore has two stages, and the
 release is assembled from the first one only:
@@ -116,16 +116,25 @@ release is assembled from the first one only:
 name = "app"
 arch = "x86_64"
 kernel = "dome-minimal"   # Dome builds it; no distribution kernel involved
-init = "sentinel"         # or none, busybox, systemd, openrc, runit, s6, dinit, path:/...
-static_linking = true     # default; this is what removes glibc
+init = "sentinel"         # none | sentinel | busybox | systemd | openrc | runit | s6 | dinit | path:/...
+static_linking = true     # the default; see below
 workload = "/usr/bin/app"
 package_manager = "none"  # none (default) | apk | pacman
-packages = []             # what the release keeps; empty is valid
+
+[runtime]
+packages = ["fish@3.7.1", "neovim"]      # what the release keeps; empty is valid
 
 [build]
-packages = ["rust", "gcc", "git"]              # used to build, never shipped
-artifacts = ["/build/target/release/app"]      # copied into the release
+packages = ["rust@1.80.0", "gcc", "git"] # used to build, never shipped
+artifacts = ["/build/target/release/app"]
+
+[shell]
+default = "fish"
+packages = ["fish@3.7.1"]
 ```
+
+Each section answers a different question: what the release keeps, what only the build needs, and
+what an interactive user gets. Packages may be pinned with `name@version`.
 
 Because the release is built from the runtime closure and the artifacts alone, the toolchain
 cannot survive by accident — there is no "remove it afterwards and hope the dependencies went
@@ -134,6 +143,69 @@ with it" step. Nothing that was installed only for building is ever present to r
 Validation is strict about the things that would be quiet mistakes: a package listed in both
 stages is refused (nobody could tell which copy the image has), an artifact path must be
 absolute, and an unknown init, architecture or package manager is rejected by name.
+
+### One config file, and it can include others
+
+A project does not repeat itself. `dome.toml` may include fragments, and the rule is the boring
+one because a clever merge is a merge nobody can predict:
+
+```toml
+include = ["base.toml", "rust.toml"]
+
+[foundation]
+name = "app"          # wins over anything an include said
+```
+
+- includes are applied first, **the including file wins** for any single value;
+- **lists concatenate**, include entries first, with duplicates removed;
+- a cycle is refused rather than followed, and a missing include names the file it wanted.
+
+### Any package may name its own manager
+
+Without a prefix, the recipe's builder decides. With one, the package says which tool fetches it:
+
+```toml
+[runtime]
+packages = ["fish", "pacman:docker", "yay:visual-studio-code-bin", "pacman:git@2.45.2"]
+```
+
+The prefix survives into the plan, so a report shows exactly what would be fetched and with what.
+
+### Static linking is the default, and turning it off is bookkept
+
+Static linking is not a style preference here. Any dynamically linked binary needs a **C library
+and the dynamic loader**, which is why glibc shows up as 50.7 MiB in the table above. The kernel's
+own documentation lists missing library dependencies as a way boot fails, and a static binary
+cannot fail that way.
+
+Setting `static_linking = false` is supported, and the engine does the arithmetic rather than
+leaving it to memory: **the C library is added to the release closure automatically**, glibc by
+default or `libc = "musl"`. The plan says so out loud.
+
+What you give up by turning it off: a smaller total image (many binaries share one libc), and
+things that need a dynamic loader at runtime — `dlopen` for plugins, NSS for user and DNS
+lookups through `libnss_*`, and language runtimes that load native extensions. Those are real
+needs; they are just not the default, because most workloads do not have them.
+
+### Who the chamber runs as, and where the project lives
+
+```toml
+[user]
+mode = "host"         # none (default) | host | custom
+# name = "dev"
+# uid  = 1000
+# gid  = 1000
+# home = "/home/dev"
+
+[workspace]
+path = "/home/dev/project"     # inside the image
+host = "/srv/project"          # optional mapping; an aperture, so its rules apply
+```
+
+`mode = "host"` copies the host's identity — name, uid, gid — into the chamber. That is what
+keeps a mapped project directory owned by you instead of by root, and it is also how Windows and
+macOS behave the same way: neither has a meaningful uid, so the engine maps the host identity to
+a numeric uid inside the image. `custom` is there for a fixed uid that must match other systems.
 
 ### The package manager is opt-in, and usually absent
 
@@ -222,6 +294,47 @@ private to one machine.
 - A committed foundation is immutable. Changing it means committing again, which produces a new
   digest — that is the reproducibility benefit, and also the reason a base should not carry
   anything you would have to patch weekly.
+
+## Stacks: several chambers that belong together
+
+A `.stack.toml` names services, each backed by a cell, and the order they start in:
+
+```toml
+[stack]
+name = "app"
+
+[services.web]
+cell = "web.cell.toml"
+
+[services.api]
+cell = "api.cell.toml"
+depends_on = ["web"]
+```
+
+A dependency says what it is waiting **for**, because Docker's `depends_on` only waits for the
+process to start — the classic race where the database is running long before it accepts
+connections:
+
+```toml
+[services.api]
+cell = "api.cell.toml"
+depends_on = ["db:healthy", "cache:port:6379"]   # or just "web" for started
+```
+
+| Form | Waits until |
+| --- | --- |
+| `"web"` | the chamber's process is running (Docker's semantics) |
+| `"db:healthy"` | the chamber's health check reports healthy (T25's tracker) |
+| `"cache:port:6379"` | something accepts a connection on that port inside the chamber |
+
+Dependencies decide the start order, and a cycle is refused at parse time rather than showing up
+later as chambers waiting on each other. Service names are hostnames on the stack's own network.
+
+**The trust boundary is membership.** Chambers in a stack can reach each other, and nothing
+outside the stack can reach them unless a cell publishes a port through its perimeter. That means
+a stack is a group of chambers that already trust each other — the same reasoning as the shared
+filesystem in ADR 0005, and the same warning applies: two services in one stack are one failure
+domain in the network sense.
 
 ## What a foundation is not
 

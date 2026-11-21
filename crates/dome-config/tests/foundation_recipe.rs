@@ -1,7 +1,7 @@
-//! Foundation recipes: what an image contains, and what that costs.
+//! Foundation recipes: sections, pins, linking and cost.
 
 use dome_config::ConfigError;
-use dome_config::foundation_recipe::{InitChoice, Recipe, ServiceManager};
+use dome_config::foundation_recipe::{InitChoice, PackageSpec, Recipe, ServiceManager, UserSpec};
 
 #[test]
 fn a_recipe_can_name_nothing_at_all() {
@@ -10,190 +10,218 @@ fn a_recipe_can_name_nothing_at_all() {
     )
     .expect("a recipe with no packages is valid");
 
-    assert!(recipe.packages.is_empty());
-    assert!(
-        recipe.static_linking,
-        "static is the default, because it removes glibc"
-    );
-
-    let plan = recipe.plan();
-    assert!(plan.rootfs_is_empty);
-    assert_eq!(plan.kernel_cmdline, "init=/usr/bin/app");
+    assert!(recipe.runtime.packages.is_empty());
+    assert!(recipe.static_linking, "static is the default");
+    assert_eq!(recipe.plan().kernel_cmdline, "init=/usr/bin/app");
 }
 
 #[test]
-fn packages_are_exactly_what_was_asked_for() {
+fn a_bare_recipe_is_a_kernel_and_an_init() {
     let recipe =
-        Recipe::from_toml("[foundation]\nname = \"app\"\npackages = [\"fish\", \"neovim\"]\n")
-            .expect("recipe");
-
+        Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"sentinel\"\n").expect("recipe");
     let plan = recipe.plan();
-    assert_eq!(plan.packages, vec!["fish".to_owned(), "neovim".to_owned()]);
-    assert!(!plan.rootfs_is_empty);
-}
 
-#[test]
-fn a_static_recipe_is_told_static_linking_removed_glibc() {
-    let recipe = Recipe::from_toml(
-        "[foundation]\nname = \"app\"\npackages = [\"fish\"]\nworkload = \"/app\"\ninit = \"none\"\n",
-    )
-    .expect("recipe");
-
-    // Static is the default, so nothing should mention glibc.
-    assert!(recipe.static_linking);
+    assert!(plan.runtime_packages.is_empty());
+    assert!(plan.rootfs_is_empty);
+    assert!(!plan.image_has_package_manager);
+    // Static, so no C library is dragged in.
     assert!(
-        !recipe
-            .plan()
-            .notes
+        !plan
+            .runtime_packages
             .iter()
-            .any(|note| note.contains("glibc")),
-        "static recipes should not be warned about glibc"
+            .any(|p| p == "glibc" || p == "musl")
     );
 }
 
+// --- sections ---
+
 #[test]
-fn dynamic_linking_is_reported_as_what_it_costs() {
+fn the_sections_answer_different_questions() {
+    let input = [
+        "[foundation]",
+        "name = \"app\"",
+        "",
+        "[runtime]",
+        "packages = [\"fish@3.7.1\", \"neovim\"]",
+        "",
+        "[build]",
+        "packages = [\"rust@1.80.0\", \"gcc\"]",
+        "artifacts = [\"/build/target/release/app\"]",
+        "",
+        "[shell]",
+        "default = \"fish\"",
+        "packages = [\"fish@3.7.1\"]",
+    ]
+    .join("\n");
+
+    let recipe = Recipe::from_toml(&input).expect("recipe");
+
+    assert_eq!(recipe.runtime.packages.len(), 2);
+    assert_eq!(recipe.build.packages.len(), 2);
+    assert_eq!(
+        recipe.shell.as_ref().map(|s| s.default.as_str()),
+        Some("fish")
+    );
+
+    let plan = recipe.plan();
+    // Runtime keeps the pin, and the shell does not duplicate it.
+    assert!(plan.runtime_packages.contains(&"fish@3.7.1".to_owned()));
+    assert_eq!(
+        plan.runtime_packages
+            .iter()
+            .filter(|p| p.starts_with("fish"))
+            .count(),
+        1
+    );
+    assert!(plan.build_packages.contains(&"rust@1.80.0".to_owned()));
+}
+
+#[test]
+fn versions_are_pinned_and_reported() {
     let recipe = Recipe::from_toml(
-        "[foundation]\nname = \"app\"\npackages = [\"bash\"]\nstatic_linking = false\n",
+        "[foundation]\nname = \"app\"\n\n[runtime]\npackages = [\"fish@3.7.1\"]\n",
     )
     .expect("recipe");
 
+    let spec = PackageSpec::parse("fish@3.7.1").expect("spec");
+    assert_eq!(spec.name, "fish");
+    assert_eq!(spec.version.as_deref(), Some("3.7.1"));
+    assert_eq!(spec.label(), "fish@3.7.1");
+
     let plan = recipe.plan();
     assert!(
-        plan.notes.iter().any(|note| note.contains("glibc")),
-        "dynamic linking must be reported: {:?}",
+        plan.notes.iter().any(|note| note.contains("pinned")),
+        "pins must be reported: {:?}",
         plan.notes
     );
 }
 
 #[test]
-fn choosing_systemd_adds_its_dependencies_and_says_what_it_weighs() {
-    let recipe = Recipe::from_toml(
-        "[foundation]\nname = \"app\"\ninit = \"systemd\"\npackages = [\"fish\"]\n",
-    )
-    .expect("recipe");
-
-    let plan = recipe.plan();
-
-    // systemd needs its libraries and dbus; the closure is the truth about the image.
-    assert!(plan.packages.contains(&"systemd-libs".to_owned()));
-    assert!(plan.packages.contains(&"dbus".to_owned()));
-    assert!(
-        plan.notes.iter().any(|note| note.contains("MiB")),
-        "the cost must be measured, not implied: {:?}",
-        plan.notes
-    );
-    assert_eq!(plan.kernel_cmdline, "init=/sbin/systemd");
-}
-
-#[test]
-fn a_lightweight_service_manager_is_a_first_class_choice() {
-    for name in ["openrc", "runit", "s6", "dinit"] {
-        let input = format!("[foundation]\nname = \"app\"\ninit = \"{name}\"\n");
-        let recipe = Recipe::from_toml(&input).expect(name);
-
-        assert_eq!(
-            recipe.init,
-            InitChoice::ServiceManager(ServiceManager::parse(name).expect("manager"))
-        );
-        assert_eq!(recipe.plan().kernel_cmdline, format!("init=/sbin/{name}"));
-    }
-}
-
-#[test]
-fn an_unknown_init_is_refused() {
-    let error = Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"magic\"\n").unwrap_err();
-    assert!(matches!(error, ConfigError::Unknown { .. }), "{error:?}");
-}
-
-#[test]
-fn init_none_needs_something_to_run() {
-    // With init = none the kernel execs the workload directly, so there must be one.
-    let error = Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"none\"\n").unwrap_err();
-    assert!(matches!(error, ConfigError::MissingField(_)), "{error:?}");
-}
-
-#[test]
-fn a_package_listed_twice_is_a_mistake() {
+fn an_empty_pin_is_refused() {
     let error =
-        Recipe::from_toml("[foundation]\nname = \"app\"\npackages = [\"fish\", \"fish\"]\n")
+        Recipe::from_toml("[foundation]\nname = \"app\"\n\n[runtime]\npackages = [\"fish@\"]\n")
             .unwrap_err();
 
-    assert!(error.to_string().contains("listed twice"), "{error}");
+    assert!(error.to_string().contains("empty version"), "{error}");
 }
 
 #[test]
-fn an_unknown_architecture_is_refused() {
-    let error = Recipe::from_toml("[foundation]\nname = \"app\"\narch = \"riscv\"\n").unwrap_err();
-    assert!(matches!(error, ConfigError::Unknown { .. }), "{error:?}");
-}
+fn the_default_shell_must_be_installed() {
+    let error = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\n\n[shell]\ndefault = \"zsh\"\npackages = [\"fish\"]\n",
+    )
+    .unwrap_err();
 
-#[test]
-fn an_explicit_init_path_is_allowed() {
-    let recipe =
-        Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"path:/usr/local/sbin/myinit\"\n")
-            .expect("recipe");
-
-    assert_eq!(recipe.plan().kernel_cmdline, "init=/usr/local/sbin/myinit");
-}
-
-#[test]
-fn a_relative_init_path_is_refused() {
-    let error =
-        Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"path:myinit\"\n").unwrap_err();
     assert!(
-        matches!(error, ConfigError::InvalidValue { .. }),
-        "{error:?}"
+        error.to_string().contains("not among the shell packages"),
+        "{error}"
     );
 }
 
-// --- the build stage never reaches the release ---
-
-const TWO_STAGE: &str = "[foundation]\nname = \"app\"\ninit = \"sentinel\"\npackages = [\"fish\"]\n\n[build]\npackages = [\"rust\", \"gcc\", \"git\"]\nartifacts = [\"/build/target/release/app\"]\n";
+// --- static linking ---
 
 #[test]
-fn build_packages_are_not_part_of_the_release() {
-    let recipe = Recipe::from_toml(TWO_STAGE).expect("recipe");
-    let plan = recipe.plan();
-
-    assert_eq!(plan.build_packages, vec!["rust", "gcc", "git"]);
-    for tool in ["rust", "gcc", "git"] {
-        assert!(
-            !plan.runtime_packages.iter().any(|package| package == tool),
-            "{tool} must not reach the release: {:?}",
-            plan.runtime_packages
-        );
-    }
-
-    assert_eq!(plan.runtime_packages, vec!["fish".to_owned()]);
+fn static_linking_is_the_default_and_needs_nothing() {
+    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n").expect("recipe");
+    assert!(recipe.static_linking);
+    assert!(
+        !recipe.plan().runtime_packages.iter().any(|p| p == "glibc"),
+        "a static image must not carry glibc"
+    );
 }
 
 #[test]
-fn artifacts_are_copied_into_the_release() {
-    let recipe = Recipe::from_toml(TWO_STAGE).expect("recipe");
+fn disabling_static_linking_adds_the_c_library_automatically() {
+    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\nstatic_linking = false\n")
+        .expect("recipe");
+
     let plan = recipe.plan();
 
-    assert_eq!(plan.artifacts, vec!["/build/target/release/app".to_owned()]);
+    // Nobody should have to remember this: a dynamic binary cannot run without a loader.
     assert!(
-        plan.notes.iter().any(|note| note.contains("artifact")),
-        "the copy must be reported: {:?}",
+        plan.runtime_packages.iter().any(|p| p == "glibc"),
+        "glibc must be added: {:?}",
+        plan.runtime_packages
+    );
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("dynamic linking")),
+        "{:?}",
         plan.notes
     );
+}
+
+#[test]
+fn musl_can_be_the_c_library_instead() {
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\nstatic_linking = false\nlibc = \"musl\"\n",
+    )
+    .expect("recipe");
+
+    let plan = recipe.plan();
+    assert!(plan.runtime_packages.iter().any(|p| p == "musl"));
+    assert!(!plan.runtime_packages.iter().any(|p| p == "glibc"));
+}
+
+// --- stages ---
+
+#[test]
+fn build_packages_never_reach_the_release() {
+    let input = [
+        "[foundation]",
+        "name = \"app\"",
+        "",
+        "[runtime]",
+        "packages = [\"fish\"]",
+        "",
+        "[build]",
+        "packages = [\"rust\", \"gcc\", \"git\"]",
+    ]
+    .join("\n");
+
+    let plan = Recipe::from_toml(&input).expect("recipe").plan();
+
+    for tool in ["rust", "gcc", "git"] {
+        assert!(
+            !plan.runtime_packages.iter().any(|p| p == tool),
+            "{tool} reached the release"
+        );
+    }
+    assert_eq!(plan.packages_dropped_after_build.len(), 3);
 }
 
 #[test]
 fn a_package_in_both_stages_is_refused() {
-    let error = Recipe::from_toml(
-        "[foundation]\nname = \"app\"\npackages = [\"fish\"]\n\n[build]\npackages = [\"fish\"]\n",
-    )
-    .unwrap_err();
+    let input = [
+        "[foundation]",
+        "name = \"app\"",
+        "",
+        "[runtime]",
+        "packages = [\"fish\"]",
+        "",
+        "[build]",
+        "packages = [\"fish\"]",
+    ]
+    .join("\n");
 
+    let error = Recipe::from_toml(&input).unwrap_err();
     assert!(
         error
             .to_string()
             .contains("both a runtime and a build package"),
         "{error}"
     );
+}
+
+#[test]
+fn a_duplicate_in_one_section_is_refused() {
+    let error = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\n\n[runtime]\npackages = [\"fish\", \"fish\"]\n",
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("listed twice"), "{error}");
 }
 
 #[test]
@@ -205,74 +233,202 @@ fn a_relative_artifact_path_is_refused() {
     assert!(error.to_string().contains("absolute"), "{error}");
 }
 
-// --- the kernel and the package manager ---
+// --- init and the package manager ---
 
 #[test]
-fn the_kernel_is_dome_own_build_by_default() {
+fn the_kernel_is_dome_own_build() {
     let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n").expect("recipe");
-
     assert_eq!(recipe.kernel, "dome-minimal");
-    assert!(
-        recipe
-            .plan()
-            .notes
-            .iter()
-            .any(|note| note.contains("not a distribution package")),
-        "no distribution kernel must be claimed"
-    );
 }
 
 #[test]
-fn no_package_manager_is_the_default() {
-    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n").expect("recipe");
+fn every_init_choice_yields_a_command_line() {
+    for (name, expected) in [
+        ("sentinel", "init=/sbin/sentinel"),
+        ("busybox", "init=/sbin/busybox"),
+        ("systemd", "init=/sbin/systemd"),
+        ("openrc", "init=/sbin/openrc"),
+        ("runit", "init=/sbin/runit"),
+        ("s6", "init=/sbin/s6"),
+        ("dinit", "init=/sbin/dinit"),
+    ] {
+        let input = format!("[foundation]\nname = \"app\"\ninit = \"{name}\"\n");
+        let recipe = Recipe::from_toml(&input).expect(name);
+        assert_eq!(recipe.plan().kernel_cmdline, expected);
+    }
+}
+
+#[test]
+fn systemd_adds_its_dependencies_and_its_measured_cost() {
+    let recipe =
+        Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"systemd\"\n").expect("recipe");
     let plan = recipe.plan();
 
-    assert!(
-        !plan.image_has_package_manager,
-        "nothing to install anything with"
-    );
+    assert!(plan.runtime_packages.iter().any(|p| p == "systemd-libs"));
+    assert!(plan.runtime_packages.iter().any(|p| p == "dbus"));
+    assert!(plan.notes.iter().any(|note| note.contains("MiB")));
+}
+
+#[test]
+fn an_unknown_init_is_refused() {
+    let error = Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"magic\"\n").unwrap_err();
+    assert!(matches!(error, ConfigError::Unknown { .. }), "{error:?}");
+}
+
+#[test]
+fn init_none_needs_a_workload() {
+    let error = Recipe::from_toml("[foundation]\nname = \"app\"\ninit = \"none\"\n").unwrap_err();
+    assert!(matches!(error, ConfigError::MissingField(_)), "{error:?}");
+}
+
+#[test]
+fn no_package_manager_by_default() {
+    let plan = Recipe::from_toml("[foundation]\nname = \"app\"\n")
+        .expect("recipe")
+        .plan();
+
+    assert!(!plan.image_has_package_manager);
     assert!(
         plan.notes
             .iter()
-            .any(|note| note.contains("no package manager")),
-        "{:?}",
-        plan.notes
+            .any(|note| note.contains("no package manager"))
     );
 }
 
 #[test]
 fn a_package_manager_can_be_asked_for() {
-    for (name, package) in [("apk", "apk-tools"), ("pacman", "pacman")] {
-        let input = format!("[foundation]\nname = \"app\"\npackage_manager = \"{name}\"\n");
-        let recipe = Recipe::from_toml(&input).expect(name);
-        let plan = recipe.plan();
+    let plan = Recipe::from_toml("[foundation]\nname = \"app\"\npackage_manager = \"apk\"\n")
+        .expect("recipe")
+        .plan();
 
-        assert!(plan.image_has_package_manager);
-        assert!(
-            plan.runtime_packages.contains(&package.to_owned()),
-            "{plan:?}"
-        );
+    assert!(plan.image_has_package_manager);
+    assert!(plan.runtime_packages.iter().any(|p| p == "apk-tools"));
+}
+
+#[test]
+fn service_managers_are_recognised_by_name() {
+    assert_eq!(ServiceManager::parse("runit"), Some(ServiceManager::Runit));
+    assert_eq!(ServiceManager::parse("nosuch"), None);
+    assert!(matches!(InitChoice::parse("none"), Ok(InitChoice::None)));
+}
+
+// --- who the chamber runs as, and where the project lives ---
+
+#[test]
+fn root_is_the_default_user() {
+    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n").expect("recipe");
+    assert_eq!(recipe.user, UserSpec::Root);
+    assert!(recipe.workspace.is_none());
+}
+
+#[test]
+fn the_host_user_can_be_copied() {
+    let recipe = Recipe::from_toml("[foundation]\nname = \"app\"\n\n[user]\nmode = \"host\"\n")
+        .expect("recipe");
+
+    assert_eq!(recipe.user, UserSpec::Host);
+    // This is what makes Windows and macOS behave like Linux: the engine maps the host identity
+    // to a numeric uid inside, so bind-mounted files keep their ownership.
+    assert!(
+        recipe
+            .plan()
+            .notes
+            .iter()
+            .any(|note| note.contains("host user"))
+    );
+}
+
+#[test]
+fn a_custom_user_carries_its_uid() {
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\n\n[user]\nmode = \"custom\"\nname = \"dev\"\nuid = 1234\n",
+    )
+    .expect("recipe");
+
+    match &recipe.user {
+        UserSpec::Custom { name, uid, .. } => {
+            assert_eq!(name, "dev");
+            assert_eq!(*uid, 1234);
+        }
+        other => panic!("expected a custom user, got {other:?}"),
     }
 }
 
 #[test]
-fn an_unknown_package_manager_is_refused() {
-    let error =
-        Recipe::from_toml("[foundation]\nname = \"app\"\npackage_manager = \"dnf\"\n").unwrap_err();
+fn a_relative_home_is_refused() {
+    let error = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\n\n[user]\nmode = \"custom\"\nhome = \"home/dev\"\n",
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("absolute"), "{error}");
+}
+
+#[test]
+fn an_unknown_user_mode_is_refused() {
+    let error = Recipe::from_toml("[foundation]\nname = \"app\"\n\n[user]\nmode = \"wizard\"\n")
+        .unwrap_err();
     assert!(matches!(error, ConfigError::Unknown { .. }), "{error:?}");
 }
 
 #[test]
-fn a_truly_empty_recipe_is_a_kernel_and_an_init() {
+fn a_workspace_names_the_project_directory() {
     let recipe = Recipe::from_toml(
-        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\nstatic_linking = true\n",
+        "[foundation]\nname = \"app\"\n\n[workspace]\npath = \"/home/dev/project\"\nhost = \"/srv/project\"\n",
     )
     .expect("recipe");
-    let plan = recipe.plan();
 
-    assert!(plan.runtime_packages.is_empty());
-    assert!(plan.build_packages.is_empty());
-    assert!(plan.artifacts.is_empty());
-    assert!(plan.rootfs_is_empty, "nothing but the init");
-    assert!(!plan.image_has_package_manager);
+    let workspace = recipe.workspace.clone().expect("workspace");
+    assert_eq!(workspace.path, "/home/dev/project");
+    assert_eq!(workspace.host.as_deref(), Some("/srv/project"));
+    assert!(
+        recipe
+            .plan()
+            .notes
+            .iter()
+            .any(|note| note.contains("mapped from"))
+    );
+}
+
+#[test]
+fn a_relative_workspace_path_is_refused() {
+    let error =
+        Recipe::from_toml("[foundation]\nname = \"app\"\n\n[workspace]\npath = \"project\"\n")
+            .unwrap_err();
+
+    assert!(error.to_string().contains("absolute"), "{error}");
+}
+
+#[test]
+fn a_package_can_name_its_own_manager() {
+    let spec = PackageSpec::parse("pacman:fish@3.7.1").expect("spec");
+    assert_eq!(spec.label(), "pacman:fish@3.7.1");
+    assert_eq!(spec.version.as_deref(), Some("3.7.1"));
+
+    let aur = PackageSpec::parse("yay:visual-studio-code-bin").expect("spec");
+    assert_eq!(aur.label(), "yay:visual-studio-code-bin");
+
+    // Without a prefix the builder decides.
+    assert_eq!(PackageSpec::parse("fish").expect("spec").label(), "fish");
+}
+
+#[test]
+fn a_prefix_without_a_package_is_refused() {
+    let error = PackageSpec::parse("pacman:").unwrap_err();
+    assert!(error.to_string().contains("no package"), "{error}");
+}
+
+#[test]
+fn mixed_managers_survive_into_the_plan() {
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\n\n[runtime]\npackages = [\"pacman:fish\", \"yay:neovim-git@0.10\"]\n",
+    )
+    .expect("recipe");
+
+    let plan = recipe.plan();
+    assert!(plan.runtime_packages.contains(&"pacman:fish".to_owned()));
+    assert!(
+        plan.runtime_packages
+            .contains(&"yay:neovim-git@0.10".to_owned())
+    );
 }

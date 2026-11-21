@@ -1,4 +1,6 @@
 pub mod foundation_recipe;
+pub mod include;
+pub mod stack;
 
 use dome_core::{
     AperturePolicy, CellSpec, CpuCount, DeviceAccess, DisplayMode, DomeError, EgressPolicy,
@@ -22,6 +24,10 @@ pub enum ConfigError {
     MissingField(&'static str),
     #[error("invalid value for {field}: {reason}")]
     InvalidValue { field: &'static str, reason: String },
+    #[error("cannot read {path}: {reason}")]
+    CannotRead { path: String, reason: String },
+    #[error("include cycle at {path}")]
+    IncludeCycle { path: String },
     #[error("unknown {kind}: {value}")]
     Unknown { kind: &'static str, value: String },
 }

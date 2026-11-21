@@ -1,25 +1,181 @@
-//! Foundation recipes: the declaration of what an image contains.
+//! Foundation recipes: what an image contains, and what that costs.
 //!
-//! There is no base image here. A foundation is the **dependency closure of what the recipe
-//! names**, and if it names nothing the image is a kernel plus an init and nothing else.
-//! That is the difference between this and every container workflow: nothing arrives because
-//! it was a reasonable default.
+//! There is no base image. A foundation is the **dependency closure of what the recipe names**,
+//! and a recipe that names nothing produces a kernel plus an init and nothing else.
 //!
-//! Two facts drive the design, both measured rather than assumed:
+//! The recipe is sectioned rather than one list, because the sections answer different
+//! questions: what the release keeps, what only the build needs, and what the interactive shell
+//! is. Each package may be pinned.
 //!
-//! - A dynamically linked binary needs glibc, which is **50.7 MiB** on an Arch host. A static
-//!   binary needs nothing, which is why [`Recipe::static_linking`] exists.
-//! - An init system is a choice, not a requirement. systemd costs **40.7 MiB** plus dbus on the
-//!   same host; the kernel is happy to exec a single static binary as PID 1.
+//! Static linking is the default and is not a style preference. Any dynamically linked binary
+//! needs a C library and the dynamic loader: glibc measured 50.7 MiB on an Arch host, and the
+//! kernel's own list of init failures includes missing library dependencies. Turning it off is
+//! supported, and does the bookkeeping rather than leaving it to be discovered.
 
 use crate::ConfigError;
+
+/// Which package manager fetches a package.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum PackageSource {
+    /// Whatever the recipe's builder uses.
+    #[default]
+    Default,
+    /// apk.
+    Apk,
+    /// pacman, official repositories.
+    Pacman,
+    /// yay, the AUR through pacman's interface.
+    Yay,
+}
+
+impl PackageSource {
+    /// Parse a prefix.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "" => Self::Default,
+            "apk" => Self::Apk,
+            "pacman" => Self::Pacman,
+            "yay" | "aur" => Self::Yay,
+            _ => return None,
+        })
+    }
+
+    /// The prefix as written.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "",
+            Self::Apk => "apk",
+            Self::Pacman => "pacman",
+            Self::Yay => "yay",
+        }
+    }
+}
+
+/// A package, optionally pinned and optionally sourced from a named manager.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageSpec {
+    /// Which package manager fetches it.
+    pub source: PackageSource,
+    /// Package name.
+    pub name: String,
+    /// Version to pin to, if any.
+    pub version: Option<String>,
+}
+
+impl PackageSpec {
+    /// An unpinned package with no manager override, for packages the recipe adds itself.
+    pub fn named(name: &str) -> Self {
+        Self {
+            source: PackageSource::Default,
+            name: name.to_owned(),
+            version: None,
+        }
+    }
+
+    /// Parse "name", "name@version", or "manager:name@version".
+    pub fn parse(value: &str) -> Result<Self, ConfigError> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "packages",
+                reason: "contains an empty name".to_owned(),
+            });
+        }
+
+        // A prefix names the manager. Without one, the recipe's builder decides.
+        let (source, body) = match trimmed.split_once(':') {
+            Some((prefix, rest)) if PackageSource::parse(prefix).is_some() => {
+                (PackageSource::parse(prefix).expect("checked"), rest.trim())
+            }
+            _ => (PackageSource::Default, trimmed),
+        };
+
+        if body.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "packages",
+                reason: format!("package {trimmed:?} names a manager but no package"),
+            });
+        }
+
+        let (name, version) = match body.split_once('@') {
+            Some((name, version)) => {
+                if version.trim().is_empty() {
+                    return Err(ConfigError::InvalidValue {
+                        field: "packages",
+                        reason: format!("package {name:?} pins an empty version"),
+                    });
+                }
+                (name.trim(), Some(version.trim().to_owned()))
+            }
+            // The body, not the original: the manager prefix was already stripped.
+            None => (body, None),
+        };
+
+        if name.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "packages",
+                reason: "contains an empty name".to_owned(),
+            });
+        }
+
+        Ok(Self {
+            source,
+            name: name.to_owned(),
+            version,
+        })
+    }
+
+    /// How it is written in a plan or a report.
+    pub fn label(&self) -> String {
+        let prefix = match self.source {
+            PackageSource::Default => String::new(),
+            other => format!("{}:", other.as_str()),
+        };
+
+        match &self.version {
+            Some(version) => format!("{prefix}{}@{version}", self.name),
+            None => format!("{prefix}{}", self.name),
+        }
+    }
+}
+
+/// One section of packages.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Packages {
+    /// The packages in this section.
+    pub packages: Vec<PackageSpec>,
+}
+
+impl Packages {
+    /// Parse a list of package strings.
+    pub fn parse(values: &[String]) -> Result<Self, ConfigError> {
+        let mut packages = Vec::with_capacity(values.len());
+        for value in values {
+            packages.push(PackageSpec::parse(value)?);
+        }
+        Ok(Self { packages })
+    }
+
+    /// Labels, for reports.
+    pub fn labels(&self) -> Vec<String> {
+        self.packages
+            .iter()
+            .map(|package| package.label())
+            .collect()
+    }
+
+    /// Whether a package of this name is present, pinned or not.
+    pub fn contains(&self, name: &str) -> bool {
+        self.packages.iter().any(|package| package.name == name)
+    }
+}
 
 /// What runs as PID 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InitChoice {
     /// No separate init: the kernel's init= names the workload binary directly.
     None,
-    /// Dome's own minimal init, which reaps and execs the workload.
+    /// Dome's own minimal init.
     Sentinel,
     /// BusyBox's init applet.
     BusyBox,
@@ -45,7 +201,7 @@ pub enum ServiceManager {
 }
 
 impl ServiceManager {
-    /// Stable name for a recipe.
+    /// Stable name.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Systemd => "systemd",
@@ -68,10 +224,7 @@ impl ServiceManager {
         })
     }
 
-    /// The measured installed size on an Arch host, in MiB.
-    ///
-    /// Only systemd was measurable here; the others live in the AUR and were not installed,
-    /// so they report None rather than a number nobody checked.
+    /// Measured installed size in MiB, where it was measured.
     pub fn measured_mib(self) -> Option<u64> {
         match self {
             Self::Systemd => Some(41),
@@ -79,7 +232,7 @@ impl ServiceManager {
         }
     }
 
-    /// Packages this manager drags in beyond itself.
+    /// Packages this manager drags in.
     pub fn extra_packages(self) -> &'static [&'static str] {
         match self {
             Self::Systemd => &["systemd-libs", "dbus"],
@@ -89,14 +242,14 @@ impl ServiceManager {
 }
 
 impl InitChoice {
-    /// Parse the init field of a recipe.
+    /// Parse the init field.
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         let trimmed = value.trim();
 
         if let Some(path) = trimmed.strip_prefix("path:") {
             if path.is_empty() || !path.starts_with('/') {
                 return Err(ConfigError::InvalidValue {
-                    field: "foundation.init",
+                    field: "init",
                     reason: format!("path {path:?} must be absolute"),
                 });
             }
@@ -129,22 +282,16 @@ impl InitChoice {
             Self::Path(path) => path,
         }
     }
-
-    /// Whether this choice needs the kernel to find a binary of its own.
-    pub fn is_separate_binary(&self) -> bool {
-        !matches!(self, Self::None)
-    }
 }
 
 /// Whether the image carries a package manager.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PackageManager {
-    /// No package manager in the image: the builder fetches packages and writes them in, so
-    /// the release carries nothing that can install anything.
+    /// None: the builder fetches packages and writes them in.
     None,
-    /// apk, for images that should install at runtime.
+    /// apk.
     Apk,
-    /// pacman, for the same reason.
+    /// pacman.
     Pacman,
 }
 
@@ -159,7 +306,7 @@ impl PackageManager {
         })
     }
 
-    /// The package this puts in the image, if any.
+    /// The package this puts in the image.
     pub fn package(self) -> Option<&'static str> {
         match self {
             Self::None => None,
@@ -169,45 +316,127 @@ impl PackageManager {
     }
 }
 
+/// The C library when linking dynamically.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CcLibrary {
+    /// glibc.
+    Glibc,
+    /// musl.
+    Musl,
+}
+
+impl CcLibrary {
+    /// Parse a name.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.trim() {
+            "" | "glibc" => Self::Glibc,
+            "musl" => Self::Musl,
+            _ => return None,
+        })
+    }
+
+    /// The package that provides it.
+    pub fn package(self) -> &'static str {
+        match self {
+            Self::Glibc => "glibc",
+            Self::Musl => "musl",
+        }
+    }
+}
+
+/// Who the chamber runs as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserSpec {
+    /// Root, which is the default and the smallest image.
+    Root,
+    /// A user copied from the host: same name, uid and gid.
+    ///
+    /// This is what makes a chamber feel like the host on Linux, and what lets Windows and
+    /// macOS behave the same way: the engine maps the host identity to a numeric uid inside,
+    /// so a bind-mounted project keeps its ownership instead of turning into root-owned files.
+    Host,
+    /// A user the recipe describes explicitly.
+    Custom {
+        /// Login name.
+        name: String,
+        /// Numeric uid.
+        uid: u32,
+        /// Numeric gid.
+        gid: Option<u32>,
+        /// Home directory, absolute.
+        home: Option<String>,
+    },
+}
+
+/// Where the project appears inside the chamber.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    /// Absolute path inside the image.
+    pub path: String,
+    /// Optional host path to map there, which is an aperture and subject to its rules.
+    pub host: Option<String>,
+}
+
 /// What a foundation should contain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recipe {
-    /// Foundation name, for the store.
+    /// Foundation name.
     pub name: String,
     /// Target architecture.
     pub arch: String,
-    /// The kernel profile. Dome builds its own; no distribution kernel package is used.
+    /// Kernel profile. Dome builds its own; no distribution kernel package is involved.
     pub kernel: String,
     /// What runs as PID 1.
     pub init: InitChoice,
-    /// Packages the release image keeps.
-    pub packages: Vec<String>,
-    /// Packages used while building and left out of the release entirely.
-    pub build_packages: Vec<String>,
-    /// Files the build produced that belong in the release image.
-    pub artifacts: Vec<String>,
-    /// Whether the release image carries a package manager.
-    pub package_manager: PackageManager,
-    /// Whether the images are static binaries, which is what removes glibc entirely.
-    pub static_linking: bool,
-    /// The workload the image exists to run, if any.
+    /// The workload, if the image exists to run one.
     pub workload: Option<String>,
+    /// Whether the binaries are static.
+    pub static_linking: bool,
+    /// Which C library the image needs when it is not static.
+    pub libc: CcLibrary,
+    /// Whether the image carries a package manager.
+    pub package_manager: PackageManager,
+    /// Packages the release keeps.
+    pub runtime: Packages,
+    /// Packages used only while building.
+    pub build: Packages,
+    /// Files the build produced that belong in the release.
+    pub artifacts: Vec<String>,
+    /// The interactive shell, if the image has one.
+    pub shell: Option<Shell>,
+    /// Who the chamber runs as.
+    pub user: UserSpec,
+    /// Where the project lives inside the chamber.
+    pub workspace: Option<Workspace>,
+}
+
+/// The shell an image offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shell {
+    /// Which shell starts by default.
+    pub default: String,
+    /// Shells to install.
+    pub packages: Packages,
 }
 
 impl Recipe {
-    /// A recipe that names nothing: the leanest possible image.
+    /// A recipe that names nothing.
     pub fn bare(name: &str, arch: &str) -> Self {
         Self {
             name: name.to_owned(),
             arch: arch.to_owned(),
             kernel: "dome-minimal".to_owned(),
             init: InitChoice::Sentinel,
-            packages: Vec::new(),
-            build_packages: Vec::new(),
-            artifacts: Vec::new(),
-            package_manager: PackageManager::None,
-            static_linking: true,
             workload: None,
+            static_linking: true,
+            libc: CcLibrary::Glibc,
+            package_manager: PackageManager::None,
+            runtime: Packages::default(),
+            build: Packages::default(),
+            artifacts: Vec::new(),
+            shell: None,
+            user: UserSpec::Root,
+            workspace: None,
         }
     }
 
@@ -215,13 +444,18 @@ impl Recipe {
     pub fn from_toml(input: &str) -> Result<Self, ConfigError> {
         #[derive(serde::Deserialize)]
         struct File {
-            foundation: Table,
+            foundation: FoundationTable,
+            #[serde(default)]
+            runtime: PackageTable,
             #[serde(default)]
             build: BuildTable,
+            shell: Option<ShellTable>,
+            user: Option<UserTable>,
+            workspace: Option<WorkspaceTable>,
         }
 
         #[derive(serde::Deserialize)]
-        struct Table {
+        struct FoundationTable {
             name: String,
             #[serde(default = "default_arch")]
             arch: String,
@@ -229,13 +463,22 @@ impl Recipe {
             kernel: String,
             #[serde(default = "default_init")]
             init: String,
-            #[serde(default)]
-            packages: Vec<String>,
             #[serde(default = "default_static")]
             static_linking: bool,
+            #[serde(default)]
+            libc: String,
             workload: Option<String>,
             #[serde(default)]
             package_manager: String,
+            /// Shorthand for the runtime section.
+            #[serde(default)]
+            packages: Vec<String>,
+        }
+
+        #[derive(serde::Deserialize, Default)]
+        struct PackageTable {
+            #[serde(default)]
+            packages: Vec<String>,
         }
 
         #[derive(serde::Deserialize, Default)]
@@ -246,13 +489,40 @@ impl Recipe {
             artifacts: Vec<String>,
         }
 
+        #[derive(serde::Deserialize)]
+        struct UserTable {
+            #[serde(default = "default_mode")]
+            mode: String,
+            #[serde(default)]
+            name: String,
+            uid: Option<u32>,
+            gid: Option<u32>,
+            home: Option<String>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct WorkspaceTable {
+            path: String,
+            host: Option<String>,
+        }
+
+        fn default_mode() -> String {
+            "none".to_owned()
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ShellTable {
+            default: String,
+            #[serde(default)]
+            packages: Vec<String>,
+        }
+
         fn default_arch() -> String {
             "x86_64".to_owned()
         }
         fn default_kernel() -> String {
             "dome-minimal".to_owned()
         }
-
         fn default_init() -> String {
             "sentinel".to_owned()
         }
@@ -263,24 +533,66 @@ impl Recipe {
         let file: File =
             toml::from_str(input).map_err(|error| ConfigError::Parse(error.to_string()))?;
 
-        let manager = PackageManager::parse(&file.foundation.package_manager).ok_or_else(|| {
-            ConfigError::Unknown {
-                kind: "package manager",
-                value: file.foundation.package_manager.clone(),
-            }
-        })?;
+        let mut runtime = Packages::parse(&file.runtime.packages)?;
+        // The shorthand merges into the runtime section rather than being a separate thing.
+        runtime
+            .packages
+            .extend(Packages::parse(&file.foundation.packages)?.packages);
 
         let recipe = Self {
             name: file.foundation.name,
             arch: file.foundation.arch,
             kernel: file.foundation.kernel,
             init: InitChoice::parse(&file.foundation.init)?,
-            packages: file.foundation.packages,
-            build_packages: file.build.packages,
-            artifacts: file.build.artifacts,
-            package_manager: manager,
-            static_linking: file.foundation.static_linking,
             workload: file.foundation.workload,
+            static_linking: file.foundation.static_linking,
+            libc: CcLibrary::parse(&file.foundation.libc).ok_or_else(|| ConfigError::Unknown {
+                kind: "C library",
+                value: file.foundation.libc.clone(),
+            })?,
+            package_manager: PackageManager::parse(&file.foundation.package_manager).ok_or_else(
+                || ConfigError::Unknown {
+                    kind: "package manager",
+                    value: file.foundation.package_manager.clone(),
+                },
+            )?,
+            runtime,
+            build: Packages::parse(&file.build.packages)?,
+            artifacts: file.build.artifacts,
+            user: match file.user {
+                None => UserSpec::Root,
+                Some(user) => match user.mode.as_str() {
+                    "none" => UserSpec::Root,
+                    "host" => UserSpec::Host,
+                    "custom" => UserSpec::Custom {
+                        name: if user.name.is_empty() {
+                            "dev".to_owned()
+                        } else {
+                            user.name
+                        },
+                        uid: user.uid.unwrap_or(1000),
+                        gid: user.gid,
+                        home: user.home,
+                    },
+                    other => {
+                        return Err(ConfigError::Unknown {
+                            kind: "user mode",
+                            value: other.to_owned(),
+                        });
+                    }
+                },
+            },
+            workspace: file.workspace.map(|workspace| Workspace {
+                path: workspace.path,
+                host: workspace.host,
+            }),
+            shell: match file.shell {
+                Some(shell) => Some(Shell {
+                    default: shell.default,
+                    packages: Packages::parse(&shell.packages)?,
+                }),
+                None => None,
+            },
         };
 
         recipe.validate()?;
@@ -303,30 +615,36 @@ impl Recipe {
             });
         }
 
-        // A package listed twice is a recipe mistake, not something to silently fold away.
-        for (index, package) in self.packages.iter().enumerate() {
-            if package.trim().is_empty() {
-                return Err(ConfigError::InvalidValue {
-                    field: "foundation.packages",
-                    reason: "contains an empty name".to_owned(),
-                });
-            }
-            if self.packages[..index].contains(package) {
-                return Err(ConfigError::InvalidValue {
-                    field: "foundation.packages",
-                    reason: format!("package {package:?} is listed twice"),
-                });
+        if self.kernel.trim().is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "foundation.kernel",
+                reason: "must name a kernel profile".to_owned(),
+            });
+        }
+
+        for section in [&self.runtime, &self.build] {
+            for (index, package) in section.packages.iter().enumerate() {
+                if section.packages[..index]
+                    .iter()
+                    .any(|earlier| earlier.name == package.name)
+                {
+                    return Err(ConfigError::InvalidValue {
+                        field: "packages",
+                        reason: format!("package {:?} is listed twice", package.name),
+                    });
+                }
             }
         }
 
         // A package in both stages is a manifest mistake: nobody could tell which copy the
         // image ended up with.
-        for package in &self.build_packages {
-            if self.packages.contains(package) {
+        for package in &self.build.packages {
+            if self.runtime.contains(&package.name) {
                 return Err(ConfigError::InvalidValue {
                     field: "build.packages",
                     reason: format!(
-                        "package {package:?} is listed as both a runtime and a build package"
+                        "package {:?} is listed as both a runtime and a build package",
+                        package.name
                     ),
                 });
             }
@@ -341,18 +659,37 @@ impl Recipe {
             }
         }
 
-        if self.kernel.trim().is_empty() {
+        if let Some(shell) = &self.shell
+            && !shell.packages.contains(&shell.default)
+        {
             return Err(ConfigError::InvalidValue {
-                field: "foundation.kernel",
-                reason: "must name a kernel profile".to_owned(),
+                field: "shell.default",
+                reason: format!("{:?} is not among the shell packages", shell.default),
             });
         }
 
-        // Something must be PID 1. With init=none the kernel execs the workload directly, so
-        // there has to be one.
+        if let UserSpec::Custom { home, .. } = &self.user
+            && let Some(home) = home
+            && !home.starts_with('/')
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "user.home",
+                reason: "must be an absolute path".to_owned(),
+            });
+        }
+
+        if let Some(workspace) = &self.workspace
+            && !workspace.path.starts_with('/')
+        {
+            return Err(ConfigError::InvalidValue {
+                field: "workspace.path",
+                reason: "must be an absolute path inside the image".to_owned(),
+            });
+        }
+
         if self.init == InitChoice::None && self.workload.is_none() {
             return Err(ConfigError::MissingField(
-                "foundation.workload (required when init = \"none\")",
+                "foundation.workload (required when init = none)",
             ));
         }
 
@@ -361,20 +698,63 @@ impl Recipe {
 
     /// What the image will contain, and what it will cost.
     pub fn plan(&self) -> Plan {
-        let mut packages = self.packages.clone();
-        let mut notes = Vec::new();
-
-        // The kernel is Dome's own build. No distribution kernel package is involved, which is
-        // why there are no modules for hardware this engine never exposes.
-        notes.push(format!(
+        let mut runtime: Vec<PackageSpec> = self.runtime.packages.clone();
+        let mut notes = vec![format!(
             "kernel {} built by Dome, not a distribution package",
             self.kernel
-        ));
+        )];
 
-        if !self.build_packages.is_empty() {
+        // Dynamic linking is not a flag that only affects the build: it decides whether the
+        // release needs a C library at all. Adding it here means nobody has to remember.
+        if !self.static_linking {
+            let libc = self.libc.package();
+            if !runtime.iter().any(|package| package.name == libc) {
+                runtime.push(PackageSpec::named(libc));
+            }
+            notes.push(format!(
+                "dynamic linking: {libc} is added to the release; glibc measured 50.7 MiB on this host"
+            ));
+        }
+
+        // The interactive shell is part of the release by definition.
+        if let Some(shell) = &self.shell {
+            for package in &shell.packages.packages {
+                if !runtime.iter().any(|existing| existing.name == package.name) {
+                    runtime.push(package.clone());
+                }
+            }
+            notes.push(format!("default shell: {}", shell.default));
+        }
+
+        if let InitChoice::ServiceManager(manager) = self.init {
+            for extra in manager.extra_packages() {
+                if !runtime.iter().any(|package| package.name == *extra) {
+                    runtime.push(PackageSpec::named(extra));
+                }
+            }
+            if let Some(mib) = manager.measured_mib() {
+                notes.push(format!(
+                    "{} was measured at {mib} MiB installed on this host",
+                    manager.as_str()
+                ));
+            }
+        }
+
+        if let Some(package) = self.package_manager.package() {
+            if !runtime.iter().any(|existing| existing.name == package) {
+                runtime.push(PackageSpec::named(package));
+            }
+            notes.push(format!(
+                "the image carries {package} and can install at runtime"
+            ));
+        } else {
+            notes.push("no package manager in the image".to_owned());
+        }
+
+        if !self.build.packages.is_empty() {
             notes.push(format!(
                 "{} build package(s) are used in a separate stage and never reach the release",
-                self.build_packages.len()
+                self.build.packages.len()
             ));
         }
 
@@ -385,55 +765,51 @@ impl Recipe {
             ));
         }
 
-        if let Some(package) = self.package_manager.package() {
-            packages.push(package.to_owned());
-            notes.push(format!(
-                "the image carries {package} and can install at runtime"
-            ));
-        } else {
-            notes.push("no package manager in the image".to_owned());
-        }
-
-        if let InitChoice::ServiceManager(manager) = self.init {
-            for extra in manager.extra_packages() {
-                if !packages.iter().any(|package| package == extra) {
-                    packages.push((*extra).to_owned());
-                }
+        match &self.user {
+            UserSpec::Root => {}
+            UserSpec::Host => {
+                notes.push(
+                    "runs as the host user: uid and gid are mapped, so shared files keep ownership"
+                        .to_owned(),
+                );
             }
-
-            if let Some(mib) = manager.measured_mib() {
-                notes.push(format!(
-                    "{} was measured at {mib} MiB installed on this host",
-                    manager.as_str()
-                ));
+            UserSpec::Custom { name, uid, .. } => {
+                notes.push(format!("runs as {name} (uid {uid})"));
             }
         }
 
-        if !self.static_linking && !packages.is_empty() {
-            // Measured, not estimated: glibc is 50.7 MiB here, and it is what makes a
-            // dynamically linked image stop being a kernel plus a binary.
-            notes.push(
-                "dynamic linking pulls glibc, measured at 51 MiB on this host; static linking removes it entirely"
-                    .to_owned(),
-            );
+        if let Some(workspace) = &self.workspace {
+            match &workspace.host {
+                Some(host) => notes.push(format!(
+                    "workspace {} is mapped from {host}",
+                    workspace.path
+                )),
+                None => notes.push(format!("workspace at {}", workspace.path)),
+            }
         }
 
-        if packages.is_empty() && self.init == InitChoice::Sentinel {
-            notes.push(
-                "no packages and the sentinel init: the image is a kernel plus one static binary"
-                    .to_owned(),
-            );
+        let pinned = runtime
+            .iter()
+            .filter(|package| package.version.is_some())
+            .count();
+        if pinned > 0 {
+            notes.push(format!("{pinned} package(s) are pinned to a version"));
         }
 
         Plan {
             kernel_cmdline: self.kernel_cmdline(),
-            runtime_packages: packages.clone(),
-            build_packages: self.build_packages.clone(),
+            runtime_packages: runtime.iter().map(|package| package.label()).collect(),
+            build_packages: self.build.labels(),
             artifacts: self.artifacts.clone(),
-            packages,
             notes,
-            rootfs_is_empty: self.packages.is_empty() && self.artifacts.is_empty(),
+            rootfs_is_empty: runtime.is_empty() && self.artifacts.is_empty(),
             image_has_package_manager: self.package_manager.package().is_some(),
+            packages_dropped_after_build: self
+                .build
+                .packages
+                .iter()
+                .map(|package| package.label())
+                .collect(),
         }
     }
 
@@ -442,8 +818,6 @@ impl Recipe {
         match &self.init {
             InitChoice::None => match &self.workload {
                 Some(workload) => format!("init={workload}"),
-                // Validation rejects this, so the fallback only exists to keep the function
-                // total rather than to be reached.
                 None => "init=/bin/sh".to_owned(),
             },
             InitChoice::Path(path) => format!("init={path}"),
@@ -463,12 +837,12 @@ pub struct Plan {
     pub build_packages: Vec<String>,
     /// Files copied from the build into the release.
     pub artifacts: Vec<String>,
-    /// Whether the release image can install packages at runtime.
-    pub image_has_package_manager: bool,
-    /// Packages after the init system's own dependencies were added.
-    pub packages: Vec<String>,
-    /// What the operator should know about the cost of their choices.
+    /// What the operator should know.
     pub notes: Vec<String>,
     /// Whether the root filesystem holds nothing but the init.
     pub rootfs_is_empty: bool,
+    /// Whether the release can install packages at runtime.
+    pub image_has_package_manager: bool,
+    /// What the build stage installs and the release therefore never contains.
+    pub packages_dropped_after_build: Vec<String>,
 }

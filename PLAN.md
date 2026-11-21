@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 240 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 361 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -4075,14 +4075,65 @@ Max Concurrent: 6 (M1 wave)
      host, so the image contains nothing installable unless `package_manager = "apk"` or
      `"pacman"` asks for it.
 
+  **Further revised:** the recipe is **sectioned** — `[runtime]`, `[build]`, `[shell]` — with
+  per-package version pins (`fish@3.7.1`). One flat list conflated three different questions.
+
+  Static linking stays the default, and disabling it is now bookkept rather than remembered: the
+  C library (glibc, or `libc = "musl"`) is added to the release closure automatically, and the
+  plan says so. What disabling buys is a smaller image for many binaries and a working dynamic
+  loader for `dlopen`, NSS and native extensions — genuine needs, just not the default.
+
+  `[shell]` names the interactive shell separately from runtime packages, and its `default` must
+  appear among the shells it installs.
+
+  **Also implemented from the follow-up:** `include` for Makefile-style composition (arrays
+  concatenate, scalars let the including file win, cycles refused);
+  per-package manager prefixes (`pacman:docker`, `yay:visual-studio-code-bin`);
+  `[user]` with host/custom/none modes and `[workspace]` with an optional host mapping.
+
   **Acceptance Criteria**:
   - [x] A recipe with no packages is valid and plans kernel-plus-init only
+  - [x] Sections parse separately, and pins are kept and reported
+  - [x] Includes merge deterministically and refuse cycles
+  - [x] A package can name its own manager
+  - [x] Host user, custom uid and workspace are configurable
+  - [x] Disabling static linking adds the C library automatically
+  - [x] The default shell must be installed
   - [x] Build packages never appear in the release closure
   - [x] Artifacts are copied in and reported
   - [x] No package manager unless asked for; asking is recorded in the plan
   - [x] Every init choice parses and yields the right kernel command line
   - [x] An unknown init, unknown architecture, duplicate package or relative init path is refused
   - [x] The plan reports measured costs for the service manager and for dynamic linking
+
+- [~] 72. **Stacks: several chambers on one isolated network**
+
+  > Not previously in the plan at all. `.cell.toml` describes one chamber; nothing described a
+  > group, so this closes a gap rather than extending a task. The model is implemented
+  > (`crates/dome-config/src/stack.rs`, seven tests); bringing one up is not.
+
+  **What to do**:
+  - `dome stack up <file.stack.toml>`: create the stack's network, then each chamber in
+    dependency order, recording the whole group in the registry
+  - Service names resolve as hostnames inside the stack network; nothing outside reaches them
+    unless a cell publishes a port through its perimeter
+  - `dome stack down` stops in reverse order, and `dome ps` shows which stack a chamber belongs to
+  - A cycle, an unknown dependency or a self-dependency is refused at parse time
+
+  **Must NOT do**:
+  - Do not let stack members share a filesystem by implication — ADR 0005 applies unchanged
+  - Do not present a shared network as isolation: members trust each other by design
+
+  **Readiness is part of the model.** `depends_on` names what it waits for, rather than copying
+  Docker's "process started" semantics: `"web"` (started), `"db:healthy"` (T25's health state),
+  or `"cache:port:6379"` (something accepts a connection). Ordering still comes from the graph.
+
+  **Acceptance Criteria**:
+  - [x] A stack parses, validates, and yields a start order
+  - [x] Cycles, unknown dependencies and self-dependencies are refused
+  - [x] Each dependency names its wait condition, and unparseable ones are refused
+  - [ ] `dome stack up` creates the network and starts services in order
+  - [ ] Two services reach each other by name; a third chamber cannot
 
 ---
 

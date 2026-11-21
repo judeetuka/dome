@@ -1,0 +1,21 @@
+# T71 rev - sections, version pins, automatic C library, stacks
+# command: cargo test -p dome-config -j4
+
+# recipes (21 tests):
+the_sections_answer_different_questions ... ok
+versions_are_pinned_and_reported ... ok
+an_empty_pin_is_refused ... ok
+the_default_shell_must_be_installed ... ok
+static_linking_is_the_default_and_needs_nothing ... ok
+disabling_static_linking_adds_the_c_library_automatically ... ok
+musl_can_be_the_c_library_instead ... ok
+build_packages_never_reach_the_release ... ok
+
+# stacks (7 tests):
+a_stack_names_its_services ... ok
+dependencies_decide_the_start_order ... ok
+a_dependency_cycle_is_refused ... ok
+a_dependency_on_an_unknown_service_is_refused ... ok
+a_service_cannot_depend_on_itself ... ok
+an_empty_stack_is_refused ... ok
+a_service_without_a_cell_is_refused ... ok
