@@ -51,6 +51,71 @@ The foundation on disk is never written to. A chamber mounts its own layer over 
 On a filesystem that can share extents, the layer costs almost nothing. On ext4 it is a copy,
 and `dome foundation list` reports which case you are in rather than leaving you to guess.
 
+## No base at all: kernel plus what the recipe names
+
+A foundation does not need a distribution, a base image, or an init system. The kernel execs one
+binary ([kernel documentation on init](https://docs.kernel.org/admin-guide/init.html)), and that
+binary is the only thing that has to work.
+
+The kernel's own list of ways that fails is the design brief:
+
+1. the init binary does not exist on the root filesystem;
+2. the console is unavailable, so there is nowhere to say so;
+3. **the binary's library dependencies are missing** (`readelf -d` shows `NEEDED`);
+4. the binary's architecture does not match;
+5. it is a script whose interpreter is not itself working.
+
+Every one of those is removed by making the workload a **static** binary: no libraries to miss,
+one file to place, one architecture to match.
+
+### What the choices cost, measured
+
+Measured on an Arch host, because these numbers decide the design:
+
+| Piece | Installed |
+| --- | --- |
+| glibc | **50.7 MiB** |
+| systemd (+ libs, dbus) | **45.5 MiB** |
+| bash | 9.6 MiB |
+| Arch `linux` package (kernel + modules) | 151.5 MiB |
+| Dome kernel image (bzImage) | 11.7 MB |
+
+The first row is the one that matters most. **Any dynamically linked binary drags in glibc**, so
+"kernel plus your program" is only literally true when the program is static. That is why
+`static_linking = true` is the default in a recipe rather than an option.
+
+### Init is a field, not a decision made for you
+
+| `init` | What it means |
+| --- | --- |
+| `none` | the kernel execs the workload directly: no init at all |
+| `sentinel` | Dome's own minimal init; reaps orphans and execs the workload |
+| `busybox` | BusyBox's init applet |
+| `systemd`, `openrc`, `runit`, `s6`, `dinit` | a service manager, your choice |
+| `path:/usr/local/sbin/foo` | any binary at that path in the image |
+
+Worth knowing before you pick: **runit, s6, dinit, openrc, tini and dumb-init are not in the
+official Arch repositories** (checked with `pacman -Si` on this host). Choosing one means the AUR
+or building it, which the builder must be able to do. systemd is in every repository and costs
+about 45 MiB.
+
+### The recipe
+
+```toml
+[foundation]
+name = "app"
+arch = "x86_64"
+init = "sentinel"        # or none, busybox, systemd, openrc, runit, s6, dinit, path:/...
+static_linking = true    # default; this is what removes glibc
+workload = "/usr/bin/app"
+packages = []            # empty means kernel plus init, nothing else
+```
+
+An empty `packages` list is valid and is the leanest image Dome can produce. The recipe is
+validated (`crates/dome-config/src/foundation_recipe.rs`), and `plan()` says what the choices
+cost: it adds the init system's own dependencies to the closure, and states the measured price of
+a service manager or of dynamic linking rather than leaving it to be discovered.
+
 ## The base foundation: clean sheet, then install
 
 The smallest useful foundation is **a kernel plus the least userland that can install more**.

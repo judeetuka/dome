@@ -1,3 +1,5 @@
+pub mod foundation_recipe;
+
 use dome_core::{
     AperturePolicy, CellSpec, CpuCount, DeviceAccess, DisplayMode, DomeError, EgressPolicy,
     FileAperture, FileApertureMode, FoundationName, GpioAperture, GpioDirection, MemorySize,

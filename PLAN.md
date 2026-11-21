@@ -4039,6 +4039,36 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
+- [x] 71. **Foundation Recipes (declaration model)**
+
+  > Research recorded in [`docs/foundations.md`](docs/foundations.md). Implemented as
+  > `crates/dome-config/src/foundation_recipe.rs` with **twelve tests**.
+
+  A recipe names packages, an init and a linking mode; **there is no base**. An empty package
+  list is valid and produces the leanest image Dome can make: a kernel plus one static binary.
+
+  The init is a field, not a decision made for the user: `none`, `sentinel`, `busybox`, a
+  service manager (`systemd`, `openrc`, `runit`, `s6`, `dinit`), or an explicit path.
+
+  `plan()` reports what the choices cost using measured values rather than estimates: systemd at
+  45.5 MiB with its dependencies, dynamic linking at 50.7 MiB of glibc. A recipe that names
+  nothing is not silently treated as an error; it is the lean case and is described as such.
+
+  Research that shaped it:
+  - [kernel documentation on init](https://docs.kernel.org/admin-guide/init.html) lists the ways
+    loading init fails, and library dependencies are one of them - which is why static linking is
+    the default;
+  - runit, s6, dinit, openrc, tini and dumb-init are absent from the official Arch repositories,
+    checked on this host, so choosing one means the AUR or a source build;
+  - `pacstrap` populates an arbitrary root using the host's package manager, which confirms a
+    builder needs no pre-existing system to install into.
+
+  **Acceptance Criteria**:
+  - [x] A recipe with no packages is valid and plans kernel-plus-init only
+  - [x] Every init choice parses and yields the right kernel command line
+  - [x] An unknown init, unknown architecture, duplicate package or relative init path is refused
+  - [x] The plan reports measured costs for the service manager and for dynamic linking
+
 ---
 
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)

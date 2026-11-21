@@ -1,0 +1,25 @@
+# T71 - foundation recipes: no base, packages and init come from config
+# command: cargo test -p dome-config --test foundation_recipe -j4
+
+a_recipe_can_name_nothing_at_all ... ok
+packages_are_exactly_what_was_asked_for ... ok
+a_static_recipe_is_told_static_linking_removed_glibc ... ok
+dynamic_linking_is_reported_as_what_it_costs ... ok
+choosing_systemd_adds_its_dependencies_and_says_what_it_weighs ... ok
+a_lightweight_service_manager_is_a_first_class_choice ... ok
+an_unknown_init_is_refused ... ok
+init_none_needs_something_to_run ... ok
+a_package_listed_twice_is_a_mistake ... ok
+an_unknown_architecture_is_refused ... ok
+an_explicit_init_path_is_allowed ... ok
+a_relative_init_path_is_refused ... ok
+
+# measured on this Arch host:
+#   glibc      50.66 MiB   <- the real cost of dynamic linking
+#   systemd    40.65 MiB + systemd-libs 3.78 + dbus 1.03
+#   bash        9.59 MiB
+#   linux     151.49 MiB (kernel + modules)
+#   bzImage    11.7 MB
+#
+# checked with pacman -Si: runit, s6, dinit, openrc, tini, dumb-init are NOT in official
+# Arch repositories. Choosing one means the AUR or a source build.
