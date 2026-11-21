@@ -314,7 +314,7 @@ framebuffer dumps, full `strace` output) are gitignored.
 Wave 0 (Kill the risk before building anything — 4 tasks, all parallel):
 ├── T59: KVM spike — open /dev/kvm, boot a kernel, UART on stdout [deep]  ← GATES ALL OF M2+
 ├── T60: Capability acquisition decision (cgroup delegation + CAP_NET_ADMIN) [deep]  ← GATES M4
-├── T61: CLI contract doc — pins the command grammar [quick]  ← GATES T5, T29, Success Criteria
+├── T61: CLI contract doc — pins the command grammar [DONE]  ← gates T5, T29
 └── T62: Repo hygiene — remainder: LICENSE, assets/, evidence policy [quick]
 
 Wave M0.5 (unblocked, can overlap Wave 0):
@@ -728,6 +728,8 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] 5. **CLI Migration to clap**
 
+  > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.
+
   **What to do**:
   - Add `clap = { version = "4.5", features = ["derive"] }` to `dome-cli/Cargo.toml`
   - Define `Cli` struct with `#[derive(Parser)]` and `Command` enum with `#[derive(Subcommand)]`
@@ -802,6 +804,8 @@ Max Concurrent: 6 (M1 wave)
 ---
 
 - [ ] 6. **Blueprint Validation Rules**
+
+  > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.
 
   **What to do**:
   - Implement `Blueprint::validate(&self) -> Result<(), Vec<ConfigError>>` in `dome-config`
@@ -2140,6 +2144,8 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] 29. **Buildroot Recipe for Minimal Foundations**
 
+  > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.
+
   **What to do**:
   - Create `foundations/buildroot/` directory with:
     - `dome-minimal.config` — Buildroot defconfig for a minimal kernel + busybox rootfs
@@ -2800,6 +2806,8 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] 47. **Cross-Platform Doctor Command Extension**
 
+  > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.
+
   **What to do**:
   - Extend `dome-cli doctor` to work on all three platforms:
     - Linux: existing, unchanged
@@ -3167,10 +3175,16 @@ Max Concurrent: 6 (M1 wave)
   **Parallelization**: Can Run In Parallel: YES with T59, T60, T62. **Blocks**: T5, T29.
   **Blocked By**: nothing.
 
+  **Completed** (2026): `docs/cli-contract.md` written and frozen at contract version 1.
+  It fixes exit codes (`0/2/3/4/5`), the `schema_version` obligation on `--format toml`,
+  the fixture convention, the domain-vocabulary mapping, and a "rejected forms" table that
+  names `dome cell validate` and `dome build <foundation>` explicitly so nobody re-adds them.
+
   **Acceptance Criteria**:
-  - [ ] `docs/cli-contract.md` covers every command referenced in this plan
-  - [ ] T5, T6, T29, T47 reference it instead of restating flags
-  - [ ] `grep -n "dome cell validate\|dome build <foundation>"` returns nothing
+  - [x] `docs/cli-contract.md` covers every command referenced in this plan
+  - [x] T5, T6, T29, T47 carry a grammar-authority pointer to it
+  - [x] The rejected forms are recorded in the contract, not silently dropped
+  - [ ] `dome --version` and `dome doctor` report `schema_version` (implemented by T5)
 
 ---
 
