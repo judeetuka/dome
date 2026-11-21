@@ -1,0 +1,17 @@
+# T10 — dome-crypto
+# command: cargo test -p dome-crypto -j4
+
+test a_flipped_bit_fails_authentication ... ok
+test a_malformed_signature_is_rejected_without_panicking ... ok
+test every_seal_uses_a_fresh_nonce ... ok
+test key_wrap_round_trip ... ok
+test seal_unseal_round_trip ... ok
+test sign_and_verify_round_trip ... ok
+test truncated_input_is_a_typed_error_not_a_panic ... ok
+test verification_fails_for_tampered_data ... ok
+test verification_fails_for_the_wrong_public_key ... ok
+test wrong_identity_cannot_unwrap ... ok
+test wrong_key_fails_authentication ... ok
+
+test result: ok. 11 passed; 0 failed
+workspace total: 135

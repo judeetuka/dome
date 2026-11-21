@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/dome-crypto",
     "crates/dome-asm",
     "crates/dome-cli",
     "crates/dome-config",

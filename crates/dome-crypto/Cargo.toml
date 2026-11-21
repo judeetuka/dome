@@ -1,0 +1,18 @@
+[package]
+name = "dome-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Cryptographic primitives for Dome images and seals"
+
+[dependencies]
+aws-lc-rs = "1.18"
+age = { version = "0.11", default-features = false, features = ["armor"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+age = { version = "0.11", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1141,47 +1141,39 @@ Max Concurrent: 6 (M1 wave)
   - `aws-lc-rs` docs for AEAD API: `aead::Aead`, `aead::Nonce`, `aead::UnboundKey`
   - `age` crate docs for `age::x25519::Recipient` and `age::x25519::Identity`
 
+  **Completed** (2026). Implementation is `crates/dome-crypto/src/lib.rs`, exercised by
+  `crates/dome-crypto/tests/crypto_ops.rs`. **Eleven tests.**
+
+  Primitives, each cited in its doc comment: AES-256-GCM from aws-lc-rs for chunk sealing
+  (fresh 96-bit nonce per call, prepended to the output); the age format with X25519 for key
+  wrapping; Ed25519 from aws-lc-rs for manifest signatures; `SystemRandom` for key material.
+  No cipher, mode, KDF or signature is invented here, and the crate knows nothing about the
+  `.dome` container.
+
+  Deviation from the plan's dependency line: `aws-lc-rs` has no `aead`/`signature` features
+  (those APIs are always present), so the manifest names the crate alone. aws-lc-rs resolved
+  to 1.19.0 and builds from source here with cmake and clang present.
+
+  One real bug, caught by a test rather than by inspection: the first version extracted the
+  Ed25519 seed by slicing the last 32 bytes of a PKCS#8 document. aws-lc-rs serialises the
+  public key inside that document, so the recovered "seed" was a different key and every
+  signature failed to verify. The fix was to stop parsing a library's serialisation by byte
+  offset: `generate_signing_keypair` returns the document, and `signing_key_from_pkcs8` hands
+  it straight back to aws-lc-rs.
+
+  The negative cases are the point: a wrong key, a single flipped bit, a wrong identity, a
+  wrong public key and a malformed signature each produce their specific error, and a
+  truncated input is a typed error rather than a panic. A test also pins that sealing the same
+  plaintext twice yields different ciphertext, which is what catches nonce reuse.
+
   **Acceptance Criteria**:
-  - [ ] `cargo test -p dome-crypto` — all crypto operations work
-  - [ ] `seal_chunk(data, key)` → `unseal_chunk(encrypted, key)` round-trips correctly
-  - [ ] `unseal_chunk(encrypted, wrong_key)` returns authentication error
-  - [ ] `wrap_file_key(key, recipient)` → `unwrap_file_key(wrapped, identity)` round-trips
-  - [ ] `unwrap_file_key(wrapped, wrong_identity)` returns error
-  - [ ] `sign_manifest(data, key)` → `verify_manifest(data, sig, pubkey)` verifies correctly
-  - [ ] Every public fn has a doc comment citing the specific primitive
-
-  **QA Scenarios**:
-
-  ```
-  Scenario: Chunk encryption round-trip
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-crypto --test crypto_ops -- seal_unseal_round_trip 2>&1
-      2. Assert: test passes
-    Expected Result: Encrypt → Decrypt produces original data
-    Evidence: evidence/task-10-roundtrip.txt
-
-  Scenario: Wrong key fails authentication
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-crypto --test crypto_ops -- wrong_key_fails 2>&1
-      2. Assert: test passes
-      3. Assert: error is CryptoError::AuthenticationFailed, not a panic
-    Expected Result: Wrong key produces specific error, not panic
-    Evidence: evidence/task-10-auth-fail.txt
-
-  Scenario: Key wrapping round-trip
-    Tool: Bash
-    Steps:
-      1. Generate age identity → wrap file key → unwrap with identity
-      2. Assert: unwrapped key == original key
-    Expected Result: Key wrapping is reversible
-    Evidence: evidence/task-10-keywrap.txt
-  ```
-
-  **Commit**: YES
-  - Message: `feat(m2): add dome-crypto crate with aws-lc-rs + age integration`
-  - Files: `crates/dome-crypto/`
+  - [x] `seal_chunk` → `unseal_chunk` round-trips
+  - [x] A wrong key returns `CryptoError::AuthenticationFailed`, never a panic
+  - [x] A flipped ciphertext bit fails authentication
+  - [x] `wrap_file_key` → `unwrap_file_key` round-trips
+  - [x] A wrong identity cannot unwrap
+  - [x] `sign_manifest` → `verify_manifest` verifies; tampering and wrong keys fail
+  - [x] Every public function cites its primitive
 
 - [ ] 11. **.dome Binary Format Constants + Header Layout**
 
