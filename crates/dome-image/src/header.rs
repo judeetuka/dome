@@ -1,12 +1,16 @@
 //! Parsing and writing the fixed `.dome` header prefix.
 
-use crate::format::{FormatError, HEADER_PREFIX_LEN, MAGIC, NONCE_LEN, TAG_LEN, VERSION};
+use crate::format::{
+    FormatError, HEADER_PREFIX_LEN, MAGIC, NONCE_LEN, SUITE_CLASSICAL, TAG_LEN, VERSION,
+};
 
 /// The fixed header at the start of a `.dome` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomeHeader {
     /// Container version.
     pub version: u32,
+    /// Cryptographic suite the container uses.
+    pub suite: u8,
     /// Length of the encrypted manifest that follows the header.
     pub manifest_length: u32,
     /// Nonce for the manifest ciphertext.
@@ -18,6 +22,7 @@ impl DomeHeader {
     pub fn new(manifest_length: u32, manifest_nonce: [u8; NONCE_LEN]) -> Self {
         Self {
             version: VERSION,
+            suite: SUITE_CLASSICAL,
             manifest_length,
             manifest_nonce,
         }
@@ -53,6 +58,14 @@ impl DomeHeader {
             });
         }
 
+        let suite = bytes[12];
+        if suite != SUITE_CLASSICAL {
+            return Err(FormatError::UnsupportedSuite {
+                found: suite,
+                supported: SUITE_CLASSICAL,
+            });
+        }
+
         let manifest_length = read_u32(bytes, 8);
 
         // A manifest ciphertext always carries a GCM tag, so anything shorter than the tag
@@ -66,10 +79,11 @@ impl DomeHeader {
         }
 
         let mut manifest_nonce = [0u8; NONCE_LEN];
-        manifest_nonce.copy_from_slice(&bytes[12..HEADER_PREFIX_LEN]);
+        manifest_nonce.copy_from_slice(&bytes[13..HEADER_PREFIX_LEN]);
 
         Ok(Self {
             version,
+            suite,
             manifest_length,
             manifest_nonce,
         })
@@ -81,6 +95,7 @@ impl DomeHeader {
         bytes.extend_from_slice(&MAGIC);
         bytes.extend_from_slice(&self.version.to_le_bytes());
         bytes.extend_from_slice(&self.manifest_length.to_le_bytes());
+        bytes.push(self.suite);
         bytes.extend_from_slice(&self.manifest_nonce);
         bytes
     }

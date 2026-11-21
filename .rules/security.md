@@ -26,3 +26,10 @@ Dome must distinguish at-rest image secrecy from live runtime secrecy:
 - Dome must not claim runtime confidentiality against malicious host root in normal native-engine mode.
 - Stronger seal modes require hardware-backed keys, measured boot, remote key release, attestation, or confidential-computing support.
 - A custom file format is packaging. It must not replace standard, reviewed cryptography.
+
+## Cryptography: primitives vs composition (ADR 0003)
+
+- Never invent a cipher, AEAD, hash, KDF or signature scheme.
+- Composition (hybrids, envelopes, key schedules) is permitted when it follows a published
+  specification, is checked against published test vectors, and is recorded in an ADR.
+- Suite 1 (X25519 + Ed25519 + AES-256-GCM) is **not** post-quantum safe. Do not claim it is.

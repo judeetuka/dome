@@ -94,7 +94,7 @@ fn a_manifest_shorter_than_a_tag_is_rejected() {
 #[test]
 fn the_layout_constants_agree_with_the_documented_sizes() {
     // Header prefix: magic(4) + version(4) + manifest_length(4) + nonce(12).
-    assert_eq!(HEADER_PREFIX_LEN, 4 + 4 + 4 + NONCE_LEN);
+    assert_eq!(HEADER_PREFIX_LEN, 4 + 4 + 4 + 1 + NONCE_LEN);
     // Chunk record: offset(8) + length(8) + nonce(12) + hash(32).
     assert_eq!(CHUNK_RECORD_LEN, 8 + 8 + NONCE_LEN + HASH_LEN);
     assert_eq!(CHUNK_RECORD_LEN, 60);
@@ -140,5 +140,21 @@ fn an_unknown_format_byte_is_a_typed_error() {
     match FoundationFormat::from_wire(0xFF) {
         Err(FormatError::UnknownFoundationFormat(byte)) => assert_eq!(byte, 0xFF),
         other => panic!("expected UnknownFoundationFormat, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_crypto_suite_is_recorded_and_classical_is_the_only_supported_one() {
+    let bytes = sample_header().write();
+    assert_eq!(bytes[12], dome_image::format::SUITE_CLASSICAL);
+
+    let mut unknown = bytes.clone();
+    unknown[12] = 2;
+    match DomeHeader::parse(&unknown) {
+        Err(FormatError::UnsupportedSuite { found, supported }) => {
+            assert_eq!(found, 2);
+            assert_eq!(supported, 1);
+        }
+        other => panic!("expected UnsupportedSuite, got {other:?}"),
     }
 }

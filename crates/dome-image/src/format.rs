@@ -28,8 +28,13 @@ pub const MAGIC: [u8; 4] = *b"DOME";
 /// Container version understood by this build.
 pub const VERSION: u32 = 1;
 
+/// Suite 1: X25519 key wrapping, AES-256-GCM content, Ed25519 signature. Classical only.
+pub const SUITE_CLASSICAL: u8 = 1;
+
 /// Length of the fixed header prefix, excluding the manifest ciphertext.
-pub const HEADER_PREFIX_LEN: usize = 24;
+///
+/// magic(4) + version(4) + manifest_length(4) + suite(1) + nonce(12).
+pub const HEADER_PREFIX_LEN: usize = 25;
 
 /// Length of a manifest or chunk nonce (AES-256-GCM standard).
 pub const NONCE_LEN: usize = 12;
@@ -80,6 +85,15 @@ pub enum FormatError {
         needed: usize,
         /// Bytes available.
         found: usize,
+    },
+
+    /// The container names a cryptographic suite this build does not implement.
+    #[error("unsupported crypto suite {found}; this build implements {supported}")]
+    UnsupportedSuite {
+        /// Suite recorded in the file.
+        found: u8,
+        /// Suite this build implements.
+        supported: u8,
     },
 
     /// A format byte does not correspond to a known foundation format.
