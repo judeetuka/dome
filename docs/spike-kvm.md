@@ -1,92 +1,75 @@
 # KVM spike (T59) — findings
 
-Status: **partial**. The KVM plumbing is proven; booting a real kernel is not yet
-achieved. Everything below is measured on this host, not estimated.
+**Status: SUCCESS.** A real Linux kernel boots on this host through KVM with no QEMU
+process anywhere. Full console log: [`../evidence/task-59-console.log`](../evidence/task-59-console.log).
 
 Host: bare metal (`systemd-detect-virt` = none), 14 cores, 15 GiB, uid 1000 in group `kvm`.
-Kernel under test: Alpine `vmlinuz-virt` 6.12.115, bzImage, boot protocol 2.15.
-Spike source: `crates/dome-engine/examples/kvm_spike.rs`.
+Guest: Alpine `vmlinuz-virt` 6.12.115, bzImage, boot protocol 2.15, 512 MiB RAM.
+Source: `crates/dome-engine/examples/kvm_spike.rs`.
 
-## What is proven to work
+## The result
 
-| Step | Evidence |
-|---|---|
-| Open `/dev/kvm` O_RDWR | `KVM_GET_API_VERSION = 12` |
-| vCPU run-struct size | `KVM_GET_VCPU_MMAP_SIZE = 12288` |
-| Create VM | `KVM_CREATE_VM` returns a live fd |
-| Map guest memory | 512 MiB region at GPA 0 via `set_user_memory_region` |
-| Apply CPUID | 57 entries from `get_supported_cpuid` |
-| Load a real bzImage | `linux_loader::bzimage::BzImage::load`, kernel at 0x100000, `init_size` 39,604,224 |
-| Enter 32-bit protected mode | flat segments, `CR0.PE`, `CR0.PG` clear, `EFER = 0` |
-| Execute guest code | a hand-written 32-bit stub runs and halts in ~240 µs |
-| Serial IO exits | 15 of 16 bytes reached the host through `KVM_EXIT_IO` on port 0x3F8 |
-| HLT exit | `KVM_EXIT_HLT` delivered normally |
+```text
+[    0.000000] Linux version 6.12.115-0-virt (buildozer@build-3-21-x86_64) ...
+[    0.000000] Command line: console=ttyS0 earlyprintk=ttyS0 keep_bootcon panic=1
+[    0.000005] clocksource: kvm-clock: mask: 0xffffffffffffffff ...
+[    0.019662] Allowing 1 present CPUs plus 0 hotplug CPUs
+[    1.127540] Kernel panic - not syncing: VFS: Unable to mount root fs on "" or unknown-block(0,0)
+```
 
-The self-test (`kvm_spike selftest`) is a hard gate: it fails if the vCPU cannot execute
-a stub and write to the serial port. It passes.
+The kernel initialises memory, timers, topology, clocksource and the console, then panics
+because there is no root filesystem attached. **That is the correct end state for a boot
+with no initramfs** — the boot path itself is proven. 13,588 bytes of console output,
+whole run in ~12 s wall clock including a deliberate deadline wait.
 
-## What does not work yet
+## What it took, in order
 
-**The kernel produces no console output and never exits.** With the Alpine bzImage loaded
-at 0x100000 and entered per the 32-bit boot protocol, the guest runs for the full deadline
-without emitting a byte and without an unhandled exit.
+Each step was a real failure with a real fix. This is the actual cost of "boot a kernel",
+which is what M3 has to budget for.
 
-Observed along the way:
+| # | Symptom | Cause | Fix |
+|---|---|---|---|
+| 1 | `InvalidKernelStartAddress` | `BzImage::load` rejects `kernel_offset < highmem_start_address` | pass `None`, let the header decide |
+| 2 | Guest halts after one exit, no output | **A vCPU with no CPUID applied cannot run a modern kernel** | `set_cpuid2(get_supported_cpuid(..))` |
+| 3 | Runs, but silent forever | No e820 map, so the decompressor has no memory to plan with | write an e820 table into boot_params |
+| 4 | Runs 3.3 s then dies in `exc_control_protection` | Pass-through CPUID advertises **CET** (shadow stack, IBT) which we do not implement | mask CET_SS and CET_IBT in leaf 7 |
+| 5 | LAPIC accesses arrive as userspace MMIO | No in-kernel IRQ chip | `vm.create_irq_chip()` |
+| 6 | (would have been) bytes silently lost | `KVM_EXIT_IO` **batches**; 16 sent, 15 received | honour `kvm_run.io.count` / `io.size` |
+| 7 | (would have been) guest prints nothing even when running | UART without LSR/IIR emulation makes the kernel discard output | emulate LSR = `0x60`, IIR = `0x01` |
+| 8 | Deadline never fires | `KVM_RUN` blocks indefinitely inside the kernel | run the vCPU on its own thread |
 
-- Before CPUID was applied, the guest halted immediately after one exit. **A vCPU with no
-  CPUID model applied cannot run a modern kernel.** Firecracker applies CPUID for exactly
-  this reason.
-- With CPUID applied, the guest stays resident and issues IO (PCI config reads on
-  `0xCFC` were observed), so it is executing real instructions — just not reaching a
-  console.
-- A 16550 that does not report "transmitter holding register empty" on LSR (`0x3FD`)
-  makes the kernel's early console silently drop every character. Emulating LSR = `0x60`
-  and IIR = `0x01` is required before any output can appear.
+Steps 2, 4 and 5 are the expensive ones to discover, and none is obvious from the code.
 
-Likely remaining causes, in order of suspicion:
+## The lesson worth carrying into M3
 
-1. **The legacy path may need the 16-bit real-mode entry**, not a direct 32-bit jump.
-   Modern kernels set `xloadflags` bits for 64-bit and EFI handover entries; entering the
-   32-bit `code32_start` directly is legal but less travelled, and something in the early
-   handoff may be rejected silently.
-2. **A boot_params field is missing or wrong.** `setup_header` is written, but e820
-   entries, `type_of_loader`, and `hardware_subarch` are left zero. The kernel can panic
-   on "no memory" before any console driver initialises.
-3. **The compressed stub needs `%esi` to survive a mode switch** and needs the
-   `boot_flag`/`header` magic verified at the right offset — worth asserting directly.
+**Pass-through CPUID is a lie unless you filter it.** Advertising a CPU feature to the
+guest that the VMM does not actually implement produces a guest that faults in code paths
+nobody expects, with a stack trace that points at the wrong subsystem. M3 needs an
+explicit, reviewed allowlist of CPUID features — not `get_supported_cpuid` verbatim.
 
-## Hazards this spike surfaced (each is real work in M3)
+## Self-test gate
 
-1. **`KVM_EXIT_IO` batches.** One exit may carry `io.count` bytes of the same port, and
-   naive one-byte-per-exit handling *loses bytes* — measured: 16 sent, 15 received. The
-   engine must honour `kvm_run.io.count` and `kvm_run.io.size`.
-2. **A UART is not just an output port.** LSR/IIR emulation is mandatory or the guest
-   silently discards output. This is device-model work, not plumbing.
-3. **CPUID must be applied** before any kernel will run.
-4. **`KVM_RUN` blocks indefinitely.** A wall-clock deadline checked between exits never
-   fires on a guest that is happily running; the vCPU must run on its own thread (this
-   spike does) or use `immediate_exit`.
-5. **`BzImage::load` rejects a kernel_offset below `highmem_start_address`** — pass
-   `None` and let the header decide.
-6. **`unsafe` is genuinely required in `dome-engine`**: `set_user_memory_region` is an
-   unsafe call. The Revision 2 section 3 override (`unsafe_code = "warn"`, deleting
-   `[lints] workspace = true`) was necessary exactly as documented.
+`kvm_spike selftest` runs a hand-written 32-bit stub that writes to the serial port and
+halts. It passes in ~240 µs and fails loudly if vCPU bring-up regresses. It is a
+regression guard for plumbing, **not** a substitute for the boot test.
 
 ## Impact on the plan's estimates
 
-Rev 1 priced "M3: boot minimal foundation" as part of a 7-task milestone. Measured reality:
-roughly 250 lines of Rust produced a vCPU that executes code and handles serial IO, and
-that is the *easy* half. Reaching a printed kernel boot additionally needs a correct
-boot-protocol handoff (real-mode or EFI path), a boot_params with a usable memory map, and
-a UART model — none of which is a one-line change.
+~300 lines of Rust now boots a kernel. Roughly two thirds of that was discovering the six
+hazards above; the remaining third is the happy path, and none of the discovery cost
+repeats. Revised shape for M3:
 
-Recommendation: keep M3 scope as "kernel console output through an emulated UART", but
-budget it as **two** tasks: a boot-protocol task (proven painful above) and a device-model
-task (UART + whatever the kernel demands next). Do not merge them.
+- **T63 (device substrate)** is partly de-risked: UART emulation and initramfs loading are
+  understood. It still owns the reusable `DeviceSet` abstraction.
+- **A new boot-protocol task** owns: zero page construction, e820, CPUID allowlist, and
+  the protected-mode entry. Everything above is its specification.
+- The "unhandled exit" arms in the spike (`MmioRead`, `MmioWrite`) are correct to leave
+  unhandled for now; they disappear once the irqchip owns the LAPIC.
 
-## Next action
+## Next steps
 
-Shortest path to a first boot: try the **16-bit real-mode entry** (`jmp 0xF000:0x1000`
-after loading, with `ds`/`es`/`si` per the boot protocol and A20 already on), instead of
-jumping straight into 32-bit protected mode at `code32_start`. If that fails, build an
-e820 map into the zero page before blaming the entry path.
+1. Attach an initramfs with a static `/init` so the boot reaches a shell prompt instead of
+   panicking — that becomes the M3 acceptance test.
+2. Replace the hard-coded CPUID mask with a reviewed feature allowlist.
+3. Turn the example into `LinuxEngine::launch` (T16–T19) with the same behaviours, plus
+   proper error types.

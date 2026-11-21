@@ -53,6 +53,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vm = kvm.create_vm()?;
     println!("created vm");
 
+    // Without an in-kernel irqchip the LAPIC is emulated in userspace: every LAPIC
+    // access becomes an MMIO exit we do not service, so no interrupt is ever delivered
+    // and the guest's timers never fire.
+    vm.create_irq_chip()?;
+    println!("created in-kernel irqchip (LAPIC + IOAPIC + PIC)");
+
     let guest_memory: GuestMemoryMmap =
         GuestMemoryMmap::from_ranges(&[(GuestAddress(0), GUEST_MEMORY_SIZE)])?;
 
@@ -115,15 +121,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     header.code32_start = KERNEL_START as u32;
 
     guest_memory.write_obj(header, GuestAddress(ZERO_PAGE + SETUP_HEADER_OFFSET))?;
-    println!("zero page armed at {ZERO_PAGE:#x}");
+    write_e820_map(&guest_memory)?;
+    println!("zero page armed at {ZERO_PAGE:#x} with an e820 map");
 
     let mut vcpu = vm.create_vcpu(0)?;
 
     // KVM starts a vCPU with no CPUID model applied. Without this the guest sees a
     // featureless CPU, fails long-mode detection and dies before it can print anything.
-    let cpuid = kvm.get_supported_cpuid(KVM_MAX_CPUID_ENTRIES)?;
+    let mut cpuid = kvm.get_supported_cpuid(KVM_MAX_CPUID_ENTRIES)?;
+    mask_unimplemented_features(&mut cpuid);
     vcpu.set_cpuid2(&cpuid)?;
-    println!("applied {} cpuid entries", cpuid.as_slice().len());
+    println!(
+        "applied {} cpuid entries (CET masked)",
+        cpuid.as_slice().len()
+    );
 
     let mut sregs = vcpu.get_sregs()?;
     sregs.cs = flat_code(SELECTOR_CODE);
@@ -351,5 +362,59 @@ fn self_test(
         Ok(())
     } else {
         Err(format!("[selftest] FAIL — expected at least 8 'X' bytes, got {captured:?}").into())
+    }
+}
+
+/// Offset of `e820_entries` inside boot_params.
+const E820_ENTRIES_OFFSET: u64 = 0x01E8;
+/// Offset of the e820 table inside boot_params.
+const E820_TABLE_OFFSET: u64 = 0x02D0;
+/// One e820 entry: 8-byte base, 8-byte length, 4-byte type.
+const E820_RECORD_SIZE: usize = 20;
+
+/// Describe guest RAM to the kernel.
+///
+/// Without this the decompressor sees an empty memory map. The low 640 KiB and the
+/// region above 1 MiB are reported as usable; the VGA hole is skipped rather than
+/// described, which is what the legacy default map does.
+fn write_e820_map(guest_memory: &GuestMemoryMmap) -> Result<(), Box<dyn std::error::Error>> {
+    let low_end: u64 = 0x0009_F000;
+    let high_start: u64 = 0x0010_0000;
+    let high_end: u64 = GUEST_MEMORY_SIZE as u64;
+
+    let mut table: Vec<u8> = Vec::new();
+    push_e820_record(&mut table, 0, low_end, 1); // usable, low memory
+    push_e820_record(&mut table, high_start, high_end - high_start, 1); // usable, high memory
+
+    guest_memory.write_slice(&table, GuestAddress(ZERO_PAGE + E820_TABLE_OFFSET))?;
+    guest_memory.write_obj(2u8, GuestAddress(ZERO_PAGE + E820_ENTRIES_OFFSET))?;
+
+    Ok(())
+}
+
+fn push_e820_record(table: &mut Vec<u8>, base: u64, length: u64, kind: u32) {
+    debug_assert_eq!(table.len() % E820_RECORD_SIZE, 0);
+    table.extend_from_slice(&base.to_le_bytes());
+    table.extend_from_slice(&length.to_le_bytes());
+    table.extend_from_slice(&kind.to_le_bytes());
+}
+
+/// Clear CPUID feature bits the VMM does not implement.
+///
+/// CPUID is passed through from the host, so the guest is told about Control-flow
+/// Enforcement Technology (shadow stack, indirect branch tracking). Nothing here sets up
+/// the CET state those features require, and a guest that believes in them faults into
+/// `exc_control_protection` and dies with a recursive fault. This is the single most
+/// important lesson of the spike: **pass-through CPUID is a lie unless you filter it**.
+fn mask_unimplemented_features(cpuid: &mut kvm_bindings::CpuId) {
+    // CPUID leaf 7, subleaf 0: ECX bit 7 = CET_SS (shadow stack), EDX bit 20 = CET_IBT.
+    const CET_SS: u32 = 1 << 7;
+    const CET_IBT: u32 = 1 << 20;
+
+    for entry in cpuid.as_mut_slice() {
+        if entry.function == 7 && entry.index == 0 {
+            entry.ecx &= !CET_SS;
+            entry.edx &= !CET_IBT;
+        }
     }
 }

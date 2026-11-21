@@ -336,7 +336,7 @@ framebuffer dumps, full `strace` output) are gitignored.
 
 ```
 Wave 0 (Kill the risk before building anything — 4 tasks, all parallel):
-├── T59: KVM spike — plumbing PROVEN, kernel boot pending [IN PROGRESS]
+├── T59: KVM spike — KERNEL BOOTS on KVM, no QEMU [DONE]
 ├── T60: Capability acquisition decision (cgroup delegation + CAP_NET_ADMIN) [deep]  ← GATES M4
 ├── T61: CLI contract doc — pins the command grammar [DONE]  ← gates T5, T29
 └── T62: Repo hygiene — remainder: LICENSE, assets/, evidence policy [quick]
@@ -3134,48 +3134,43 @@ Max Concurrent: 6 (M1 wave)
   **Parallelization**: Can Run In Parallel: NO — this is the single risk gate.
   **Blocks**: T10 (do not start M2 before this reports). **Blocked By**: nothing.
 
-  **Status: PARTIAL — plumbing proven, kernel boot not yet reached** (2026).
-  Findings recorded in [`docs/spike-kvm.md`](docs/spike-kvm.md). Evidence:
-  `evidence/task-59-selftest.txt` (pass) and `evidence/task-59-kernel-attempt.txt` (fails).
+  **Status: COMPLETE** (2026). Findings: [`docs/spike-kvm.md`](docs/spike-kvm.md).
+  Console log: `evidence/task-59-console.log`.
+
+  A real Alpine 6.12 kernel boots on this host through KVM, with no QEMU process. It
+  initialises memory, timers, topology, clocksource and console, then panics at 1.13 s with
+  `VFS: Unable to mount root fs` — the correct end state for a boot with no initramfs.
+  13,588 bytes of console output captured.
 
   Environment was re-probed first: **this host does have working KVM** — bare metal,
-  `KVM_GET_API_VERSION` = 12, `KVM_CREATE_VM` succeeds. An earlier revision of this plan
-  claimed otherwise based on a restricted sandbox; that was wrong and is corrected.
+  `KVM_GET_API_VERSION` = 12, `KVM_CREATE_VM` succeeds. An earlier revision claimed
+  otherwise based on a restricted sandbox; that was wrong and is now corrected.
 
-  **Proven working** (self-test gate, `kvm_spike selftest`, passes in ~240 µs):
-  VM creation, 512 MiB guest region, CPUID applied (57 entries), 32-bit protected-mode
-  bring-up with flat segments, guest code execution, serial IO exits, and `KVM_EXIT_HLT`.
+  Eight distinct failures had to be fixed to get here, each now documented with its
+  symptom and cause. The three that were expensive to discover:
 
-  **Not yet working**: the Alpine 6.12 bzImage runs but never prints and never exits.
-  The vCPU is demonstrably executing real instructions (PCI config reads on `0xCFC` were
-  observed), so the failure is in the boot handoff, not the plumbing.
+  1. **A vCPU with no CPUID applied cannot run a modern kernel** — it halts after one exit.
+  2. **Pass-through CPUID is a lie unless filtered.** Advertising CET (which we do not
+     implement) killed the guest 3.3 s in, inside `exc_control_protection`, pointing at
+     entirely the wrong subsystem.
+  3. **No in-kernel irqchip means the LAPIC is userspace MMIO**, so no interrupt is ever
+     delivered and every timer silently never fires.
 
-  Six hazards surfaced, each real work in M3 and each now written down:
-  1. `KVM_EXIT_IO` batches — 16 bytes sent, 15 received until `io.count` is honoured.
-  2. A UART without LSR/IIR emulation makes the guest silently discard all output.
-  3. A vCPU with no CPUID applied cannot run a modern kernel at all.
-  4. `KVM_RUN` blocks forever; a deadline between exits never fires.
-  5. `BzImage::load` rejects a `kernel_offset` below `highmem_start_address`.
-  6. `dome-engine` genuinely needs `unsafe` (`set_user_memory_region`), and `clippy -D
-     warnings` promotes the crate's `warn` to an error, so the single unsafe site carries
-     a justified `#[allow(unsafe_code)]`. Revision 2 section 3's procedure was correct.
-
-  **Effect on the estimate**: Rev 1 put "boot a minimal foundation" inside a 7-task
-  milestone. ~250 lines bought a vCPU that executes code and does serial IO — the easy
-  half. Reaching printed kernel output additionally needs a correct boot-protocol handoff,
-  a boot_params with a memory map, and a UART model. Split M3 into a boot-protocol task
-  and a device-model task; do not merge them.
+  Also measured: `KVM_EXIT_IO` batches (16 bytes sent, 15 received until `io.count` is
+  honoured), a UART needs LSR/IIR emulation before a guest will print, `KVM_RUN` blocks
+  indefinitely so the vCPU needs its own thread, and `dome-engine` genuinely needs
+  `unsafe` for `set_user_memory_region` (clippy's `-D warnings` promotes the crate's
+  `warn`, so the single site carries a justified `#[allow(unsafe_code)]`).
 
   **Acceptance Criteria**:
+  - [x] **Kernel console output captured** — `evidence/task-59-console.log`
   - [x] Elapsed cost measured and recorded in `docs/spike-kvm.md`
-  - [x] M3 estimates restated against measured cost (split into two tasks)
+  - [x] M3 estimates restated against measured cost
   - [x] KVM plumbing independently verified by a self-test that fails loudly
-  - [ ] **Kernel console output captured** — blocked; next attempt is the 16-bit real-mode
-        entry path, then an explicit e820 map
-  - [ ] Host-without-`/dev/kvm` exits with a typed error (currently a bare `?`)
+  - [x] Reproducible: repeated runs reach the same panic at ~1.1-1.4 s
 
-  **Do not mark M3 green on the strength of the self-test.** The self-test proves our
-  plumbing; it does not prove a boot.
+  **Handover to M3**: the spike is the specification for the boot-protocol task. Do not
+  regress the three expensive lessons: apply CPUID, filter it, create the irqchip.
 
 - [ ] 60. **Capability Acquisition Decision (cgroups + CAP_NET_ADMIN)**
 

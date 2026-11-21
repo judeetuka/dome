@@ -1,25 +1,10 @@
-# T59 — kernel boot attempt (NOT yet successful; console output is empty)
-# command: cargo run -p dome-engine --example kvm_spike -- tests/fixtures/kernel/vmlinuz-virt 6
+# T59 — SUPERSEDED: this file used to record a failed boot.
+# The boot now succeeds; see evidence/task-59-console.log for the full log.
+# Latest run summary:
 
-kvm api version: 12
-vcpu mmap size:  12288
-created vm
-mapped 512 MiB of guest memory
-loaded kernel at 0x100000, init_size 39604224 bytes
-zero page armed at 0x7000
-applied 58 cpuid entries
-entering kernel at 0x100000
+[    1.473363] Kernel Offset: 0x11000000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.477672] Rebooting in 1 seconds..
+[spike] 13588 bytes of console output after 12s
+[spike] total elapsed: 12.012780587s
 
-[spike] 0 bytes of console output after 6s
-[spike] total elapsed: 6.04321843s
-warning: usage of an `unsafe` block
-  --> crates/dome-engine/examples/kvm_spike.rs:71:5
-   |
-71 |     unsafe { vm.set_user_memory_region(region)? };
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: requested on the command line with `-W unsafe-code`
-
-
-
-EXIT: 3
+EXIT: 0
