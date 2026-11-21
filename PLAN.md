@@ -3632,6 +3632,38 @@ Max Concurrent: 6 (M1 wave)
   - [ ] Requesting a PCI/USB aperture on this host fails with a typed `IoMmuUnavailable` error
   - [ ] Every device parser has a fuzz target and a seed corpus
 
+- [ ] 68. **Post-Quantum Suite 2 (X25519 + ML-KEM-768, dual signatures)**
+
+  > Specification: [`docs/adr/0003-post-quantum-crypto.md`](docs/adr/0003-post-quantum-crypto.md).
+  > Standards verified against primary sources: FIPS 203/204/205 (final, Aug 2024),
+  > RFC 10024 (Standards Track, Aug 2026) for the hybrid combination, NIST IR 8547 for the
+  > 2035 removal deadline. X-Wing is deliberately not used: still an Informational draft.
+
+  **What to do**:
+  - `dome-crypto`: X25519 + ML-KEM-768 encapsulation combined per RFC 10024, HKDF-SHA256
+    schedule. aws-lc-rs 1.19 already exposes `kem::ML_KEM_768` and `pqdsa::PqdsaKeyPair`;
+    no new crypto dependency is needed.
+  - Dual signatures: Ed25519 **and** ML-DSA-65, both required to verify.
+  - Writer/reader: **derive the signature and wrapping lengths from the suite byte**, never
+    from `SIGNATURE_LEN`. ML-DSA-65 is ~3309 bytes against Ed25519's 64, so a suite-2 file
+    mis-framed by a suite-1 constant would parse garbage or fail confusingly.
+  - Test against published RFC 10024 / FIPS 203 vectors, and add a suite-2 round-trip,
+    a downgrade-refusal test, and a mixed-signature test (one valid, one forged → reject).
+
+  **Must NOT do**:
+  - Do not invent a combiner; follow RFC 10024.
+  - Do not use Falcon or HQC: both are selected but their standards are unfinished.
+  - Do not claim PQ safety for suite 1, or for suite 2 before its vectors pass.
+
+  **Acceptance Criteria**:
+  - [ ] Vectors from the specifications pass
+  - [ ] Suite-2 container round-trips with a payload spanning several chunks
+  - [ ] A suite-1 reader refuses a suite-2 file with `UnsupportedSuite`
+  - [ ] Dual signatures: a file with one forged signature is rejected
+  - [ ] No `SIGNATURE_LEN` constant is used to locate the footer
+
+---
+
 ---
 
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)

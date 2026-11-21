@@ -31,17 +31,49 @@ composition. Amended:
 Layering is not itself a security win: every layer adds parsing surface and key-management
 burden. Prefer few, specified layers.
 
+## Standards check (verified against primary sources, 2026)
+
+| Standard | Status | Use |
+|---|---|---|
+| FIPS 203 — ML-KEM | final, Aug 2024 | key encapsulation |
+| FIPS 204 — ML-DSA | final, Aug 2024 | signatures |
+| FIPS 205 — SLH-DSA | final, Aug 2024 | hash-only signatures, archival |
+| RFC 10024 — PQ/T hybrid key agreement (TLS 1.3) | **Standards Track, Aug 2026** | the hybrid combination |
+| `draft-connolly-cfrg-xwing-kem-11` (X-Wing) | **Internet-Draft, Informational** | not used: superseded for our purpose by RFC 10024 |
+| Falcon, HQC | selected, **standards still in progress** | not used until final |
+| NIST IR 8547 | final | quantum-vulnerable algorithms deprecated and removed by **2035**, high-risk far earlier |
+
+**Correction.** An earlier draft of this ADR proposed X-Wing. X-Wing is a well-reviewed
+construction but it is still an Individual Internet-Draft. RFC 10024 puts the same
+combination — X25519 together with ML-KEM-768 — on Standards Track and in deployment, so
+that is what suite 2 cites.
+
 ## Suite 2 — hybrid, dual-algorithm
 
-- **Key wrapping**: X-Wing (`X25519 + ML-KEM-768`, CFRG draft, with test vectors). The file
-  key survives unless both X25519 *and* ML-KEM break.
-- **Key schedule**: HKDF-SHA256. Standard.
+- **Key wrapping**: X25519 + **ML-KEM-768** (FIPS 203), combined per **RFC 10024**: both
+  shared secrets go through the KDF, so the file key survives unless X25519 *and* ML-KEM both
+  break. ML-KEM-1024 is the level-5 option if we want the margin.
+- **Key schedule**: HKDF-SHA256.
 - **Content**: AES-256-GCM, unchanged.
 - **Signatures**: Ed25519 **and** ML-DSA-65 (FIPS 204), verified independently, accepted only
-  if both pass. Forgery then requires breaking curves and lattices together.
-- **Suite identifier**: a suite byte is in the header from now on (25-byte prefix). Suite 1 is
-  classical; unknown suites are refused with `FormatError::UnsupportedSuite` rather than
-  parsed on a guess.
+  if both pass. SLH-DSA (FIPS 205) is the archival alternative: hash-based, so it rests on a
+  different assumption than lattices.
+- **Suite identifier**: a suite byte is in the header (25-byte prefix). Suite 1 is classical;
+  unknown suites are refused with `FormatError::UnsupportedSuite` rather than parsed on a
+  guess.
+
+### Format consequence that the suite byte exists to absorb
+
+Suite 2 is much larger than suite 1, and the current layout assumes suite-1 sizes:
+
+| Item | Suite 1 | Suite 2 |
+|---|---|---|
+| signature footer | 64 B (Ed25519) | 64 B + ~3309 B (ML-DSA-65), or dual |
+| wrapping blob | 32 B (X25519) | 32 B + 1088 B (ML-KEM-768 ciphertext) |
+| public key | 32 B | 32 B + 1184 B |
+
+So **the footer length must become suite-dependent**. A reader must derive it from the suite,
+never from the constant it uses today, or a suite-2 file would be silently mis-framed.
 
 Primitives are already available in aws-lc-rs 1.19 (`kem` module, `ML_DSA_44/65/87`). `age`
 has no PQ recipient, so suite 2 defines its own wrapping rather than extending age.
