@@ -20,9 +20,11 @@ pub enum EngineError {
     IoMmuUnavailable(String),
 }
 
+pub mod cpuid;
 pub mod loader;
 pub mod memory;
 pub mod sandbox;
+pub mod vcpu;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
