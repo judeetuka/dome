@@ -336,7 +336,7 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T5: CLI migration to clap [DONE, incl. validate]
 ├── T6: Blueprint validation rules [DONE]
 ├── T7: Wire dome-device into dome-host-linux [DONE]
-├── T8: dome-test-utils crate [quick]
+├── T8: dome-test-utils crate [DONE]
 └── T9: M1 integration tests + round-trip validation [unspecified-high]
 
 Wave M2 (Dome Foundation Format — 5 tasks, 3 parallel):
@@ -964,26 +964,31 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-config/src/lib.rs` — Blueprint type for TOML fixtures
   - `tests/fixtures/linux-host/` — Existing fixture pattern to follow
 
+  **Completed** (2026). 5 tests in `crates/dome-test-utils/tests/helpers.rs`.
+  Consumed as a `[dev-dependencies]` entry by `dome-config`; never a runtime dependency.
+
+  Design notes:
+
+  - **Fixture text is embedded with `include_str!`**, not read at test runtime via a
+    relative path. A test that builds its path from the working directory passes or fails
+    depending on how cargo was invoked; embedding makes the coupling explicit and
+    compile-checked.
+  - **`workspace_root()` resolves from `CARGO_MANIFEST_DIR` at compile time**, so
+    `test_fixture_path` works from any working directory.
+  - **`verify_round_trip` returns `Result`, not panic**, so callers can use `?` inside
+    tests that already return a Result. It also reports both values on mismatch, which a
+    bare `assert_eq!` cannot do for an opaque type.
+  - `invalid_zero_memory_cell_toml` and `invalid_limits_cell_toml` are deliberately
+    different failures: the first is rejected at construction, the second parses and is
+    rejected by `validate()`. Tests need both paths, so both helpers exist.
+
   **Acceptance Criteria**:
-  - [ ] `cargo check -p dome-test-utils` passes
-  - [ ] `cargo test -p dome-test-utils` passes
-  - [ ] Helper functions return valid sample data
-  - [ ] `verify_round_trip` works for a test case
-
-  **QA Scenarios**:
-  ```
-  Scenario: Test utilities compile and work
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-test-utils 2>&1
-      2. Assert: tests pass
-      3. Write a quick test using valid_cell_toml()
-      4. Assert: TOML parses successfully
-    Expected Result: Test utilities are functional
-    Evidence: evidence/task-8-test-utils.txt
-  ```
-
-  **Commit**: NO (groups with T1, T2, T3, T7)
+  - [x] `crates/dome-test-utils/` exists and is a workspace member
+  - [x] `test_fixture_path`, `valid_cell_toml`, `invalid_zero_memory_cell_toml`
+  - [x] `sample_foundation_manifest` returns a reusable manifest
+  - [x] `verify_round_trip<T>` generic over `Serialize + DeserializeOwned + PartialEq + Debug`
+  - [x] Used as a `dev-dependency`, demonstrated by `dome-config`'s validation test
+  - [x] Workspace total 73 tests, all four verification commands green
 
 - [ ] 9. **M1 Integration Tests (Round-Trip, Validation, Edge Cases)**
 

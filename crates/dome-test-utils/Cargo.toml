@@ -1,0 +1,18 @@
+[package]
+name = "dome-test-utils"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dome-core = { path = "../dome-core" }
+dome-image = { path = "../dome-image" }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+dome-config = { path = "../dome-config" }
+
+[lints]
+workspace = true

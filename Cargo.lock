@@ -131,6 +131,7 @@ name = "dome-config"
 version = "0.1.0"
 dependencies = [
  "dome-core",
+ "dome-test-utils",
  "serde",
  "thiserror",
  "toml",
@@ -204,6 +205,17 @@ name = "dome-supervisor"
 version = "0.1.0"
 dependencies = [
  "dome-core",
+]
+
+[[package]]
+name = "dome-test-utils"
+version = "0.1.0"
+dependencies = [
+ "dome-config",
+ "dome-core",
+ "dome-image",
+ "serde",
+ "toml",
 ]
 
 [[package]]

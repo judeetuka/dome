@@ -45,16 +45,14 @@ fn fields(errors: &[ConfigError]) -> Vec<String> {
 
 #[test]
 fn accepts_the_shared_fixture() -> TestResult {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/fixtures/valid.cell.toml"
-    );
-    let input = std::fs::read_to_string(path)?;
-    let blueprint = Blueprint::from_toml(&input)?;
-
+    // Fixture text and its path both come from dome-test-utils, so this test cannot
+    // drift from what the CLI and other crates use.
+    let blueprint = Blueprint::from_toml(dome_test_utils::valid_cell_toml())?;
     blueprint
         .validate()
         .expect("the shared fixture must be valid");
+
+    assert!(dome_test_utils::test_fixture_path("valid.cell.toml").is_file());
     Ok(())
 }
 

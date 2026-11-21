@@ -1,0 +1,13 @@
+# T8 — dome-test-utils crate
+# command: cargo test -p dome-test-utils -j4
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test fixture_paths_resolve_to_real_files ... ok
+test round_trip_helper_is_usable_from_tests ... ok
+test embedded_fixtures_parse ... ok
+test sample_manifest_uses_canonical_naming ... ok
+test round_trip_helper_accepts_equal_values ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0

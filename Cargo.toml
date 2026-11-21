@@ -15,6 +15,7 @@ members = [
     "crates/dome-obfuscation",
     "crates/dome-plugin",
     "crates/dome-supervisor",
+    "crates/dome-test-utils",
 ]
 default-members = ["crates/dome-cli"]
 
