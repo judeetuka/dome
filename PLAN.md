@@ -16,7 +16,7 @@
 > - macOS (Apple Hypervisor) + Windows (Hyper-V) engines (M8)
 > - ARM64 foundations + Raspberry Pi OS userland (M9)
 >
-> **Estimated Effort**: Extra Large (67 implementation tasks + 4 review tasks) — see Revision 2 for the 8 added tasks
+> **Estimated Effort**: Extra Large (69 implementation tasks + 4 review tasks) — see Revision 2 for the 8 added tasks
 > **Parallel Execution**: YES — Wave 0 plus 9 milestone waves with intra-wave parallelism
 > **Critical Path**: T59 (KVM spike, risk-death) → T61 (CLI contract) → M1 (parsing) → M2 (format) → T63 (virtio substrate) → M3 (engine) → M4 (lifecycle) → M5-M9
 > **Hard gate**: M2 and later cannot be validated without a host that exposes `/dev/kvm`. T59 settles this before any format work begins.
@@ -35,7 +35,7 @@ verification is reproducible from a clean checkout.
 | **M2** format + crypto | T10–T14, T68 | **DONE** (6/6) — crypto, header, writer, reader, integration, PQ suite 2 |
 | **M3** engine | T15–T21 | **DONE** (7/7) — real kernel boots in-engine, inside the cage |
 | M3 sign-off gate | T67 | **partial** — CPUID policy, DMA refusal, cage done; device-set pin, I/O rate limits, fuzz owed |
-| M4 chambers, cgroups, netns | T22–T28, T63–T64 | not started — ADR 0001 settled the privileges, T63 substrate is the entry point |
+| M4 chambers, cgroups, netns | T22–T28, T63–T64, T69 | **in progress** — T22–T25 and T69 done; seal, export, integration and substrate remain |
 | M5 OS builder | T29–T32, T65 | not started |
 | M6 sentinel + display | T33–T37 | not started |
 | M7 apertures | T38–T42 | not started |
@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 199 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 223 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -3834,6 +3834,50 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
+- [x] 69. **Restart Policy and Host-Restart Reconciliation**
+
+  > Driven by a product requirement: a running chamber should come back after the host
+  > restarts. Cgroups and namespaces do not survive a reboot; the **record** does, and it is
+  > the only thing that can answer "should this be running?" at startup.
+
+  **What it does** — `crates/dome-supervisor/src/restart.rs` and `state.rs`, **thirteen tests**:
+
+  | Docker `--restart` | Dome |
+  | --- | --- |
+  | `no` | `RestartPolicy::No` |
+  | `on-failure[:max]` | `OnFailure { max_retries }`, counting crashes and host loss |
+  | `always` | `Always` |
+  | `unless-stopped` | `UnlessStopped`, kept for familiarity |
+
+  **Two flaws fixed rather than copied:**
+
+  1. Under Docker's `always`, a manually stopped container restarts when the daemon restarts,
+     which surprises the operator who stopped it. Dome records *why* a chamber stopped, so a
+     deliberate stop sticks under **every** policy — a test asserts it across all four.
+  2. Because of that fix the two permissive policies became equivalent. Rather than invent a
+     third meaning for a name Docker users already know, the documentation says so plainly and
+     a test pins the equality, so it stays a decision instead of becoming an accident.
+
+  Durability: one plain-text `key=value` record per chamber under
+  `$XDG_STATE_HOME/dome/chambers`, written to a temporary file and renamed so a crash leaves
+  the old record or the new one, never a partial one. A corrupt record is **reported and
+  skipped** rather than blocking the others — one bad file must not take the host's chambers
+  down. `reconcile()` treats a record that was running as [`ExitReason::HostLost`], which is
+  not the chamber's fault and is exactly what a restart policy is for.
+
+  Chamber ids are validated on the way to a filename, and a test tries traversal ids to prove
+  the record cannot escape the state directory.
+
+  **Acceptance Criteria**:
+  - [x] All four policies, with the operator-stop rule holding under each
+  - [x] A bounded retry budget stops restarting once spent
+  - [x] Records round-trip, and saving is atomic
+  - [x] A corrupt record does not hide the valid ones
+  - [x] Reconciliation resumes what was running and nothing else
+  - [x] The record cannot escape its directory
+
+---
+
 ---
 
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)
@@ -3842,7 +3886,7 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] F1. **Plan Compliance Audit** — `oracle`
       Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, cargo test, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `evidence/`. Compare deliverables against plan.
-      Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/67] | VERDICT: APPROVE/REJECT`
+      Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/69] | VERDICT: APPROVE/REJECT`
 
 - [ ] F2. **Code Quality Review** — `unspecified-high`
       Run `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, `println!`/`eprintln!` in lib code, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (`data`/`result`/`item`/`temp`).
@@ -3854,7 +3898,7 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] F4. **Scope Fidelity Check** — `deep`
       For each task: read "What to do", read actual diff (`git diff --stat HEAD~N..HEAD`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
-      Output: `Tasks [N/67 compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
+      Output: `Tasks [N/69 compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
 ---
 
@@ -3900,7 +3944,7 @@ cargo check --target x86_64-pc-windows-msvc
 
 - [ ] All "Must Have" present
 - [ ] All "Must NOT Have" absent
-- [ ] All 67 tasks completed
+- [ ] All 69 tasks completed
 - [ ] T59 (KVM spike) completed on real KVM hardware, with console evidence committed
 - [ ] Every architecture-mismatch and missing-device path returns a typed error, not a panic
 - [ ] All tests pass (unit + integration + doc)

@@ -1,0 +1,22 @@
+# T69 — restart policy and host-restart reconciliation
+# command: cargo test -p dome-supervisor --test restart -j4
+
+policy matrix:
+  no_policy_never_restarts ... ok
+  an_operator_stop_always_sticks ... ok
+  always_restarts_after_a_clean_exit_or_a_lost_host ... ok
+  unless_stopped_is_identical_to_always_by_design ... ok
+  on_failure_ignores_a_clean_exit_but_not_a_crash ... ok
+  a_bounded_on_failure_policy_stops_after_its_budget ... ok
+  policies_survive_a_round_trip_through_their_record_form ... ok
+
+durable records:
+  a_record_round_trips ... ok
+  saving_leaves_no_temporary_file_behind ... ok
+  one_corrupt_record_does_not_hide_the_others ... ok
+  reconcile_resumes_what_was_running_under_a_permissive_policy ... ok
+  reconcile_does_not_resume_something_an_operator_stopped ... ok
+  a_hostile_id_cannot_escape_the_state_directory ... ok
+
+# sources: docs.docker.com/engine/containers/start-containers-automatically
+#          docs.docker.com/engine/daemon/live-restore
