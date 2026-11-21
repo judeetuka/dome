@@ -506,7 +506,9 @@ dependencies = [
 name = "dome-image"
 version = "0.1.0"
 dependencies = [
+ "age",
  "dome-core",
+ "dome-crypto",
  "thiserror 2.0.21",
 ]
 

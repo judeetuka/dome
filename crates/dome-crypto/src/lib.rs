@@ -11,8 +11,11 @@ use std::str::FromStr;
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use aws_lc_rs::rand::{SecureRandom, SystemRandom};
-use aws_lc_rs::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+use aws_lc_rs::signature::{ED25519, KeyPair, UnparsedPublicKey};
 use thiserror::Error;
+
+/// Re-exported so callers can hold a signing key without depending on aws-lc-rs directly.
+pub use aws_lc_rs::signature::Ed25519KeyPair;
 
 /// Length of an AES-256 key in bytes.
 pub const KEY_LEN: usize = 32;
@@ -272,4 +275,77 @@ fn open_key(key: &[u8; KEY_LEN]) -> Result<LessSafeKey, CryptoError> {
         .map_err(|_| CryptoError::InvalidKey("unusable AES-256 key".to_owned()))?;
 
     Ok(LessSafeKey::new(unbound))
+}
+
+/// Encrypt with AES-256-GCM using a caller-supplied nonce, returning ciphertext and tag.
+///
+/// Uses AES-256-GCM from aws-lc-rs. Unlike [seal_chunk] the nonce is not prepended: a
+/// container that stores the nonce in its own structure needs the ciphertext alone. The
+/// caller becomes responsible for never reusing a nonce under one key, which is why this
+/// function is named the way it is.
+pub fn seal_with_nonce(
+    data: &[u8],
+    key: &[u8; KEY_LEN],
+    nonce_bytes: &[u8; NONCE_LEN],
+) -> Result<Vec<u8>, CryptoError> {
+    let less_safe = open_key(key)?;
+    let nonce = Nonce::assume_unique_for_key(*nonce_bytes);
+
+    let mut ciphertext = data.to_vec();
+    less_safe
+        .seal_in_place_append_tag(nonce, Aad::empty(), &mut ciphertext)
+        .map_err(|_| CryptoError::InvalidKey("sealing failed".to_owned()))?;
+
+    Ok(ciphertext)
+}
+
+/// Decrypt and authenticate ciphertext produced by [seal_with_nonce].
+///
+/// Uses AES-256-GCM from aws-lc-rs. The tag must verify before any plaintext is returned.
+pub fn unseal_with_nonce(
+    ciphertext: &[u8],
+    key: &[u8; KEY_LEN],
+    nonce_bytes: &[u8; NONCE_LEN],
+) -> Result<Vec<u8>, CryptoError> {
+    if ciphertext.len() < TAG_LEN {
+        return Err(CryptoError::Truncated {
+            expected: TAG_LEN,
+            actual: ciphertext.len(),
+        });
+    }
+
+    let less_safe = open_key(key)?;
+    let nonce = Nonce::assume_unique_for_key(*nonce_bytes);
+
+    let mut payload = ciphertext.to_vec();
+    let plaintext = less_safe
+        .open_in_place(nonce, Aad::empty(), &mut payload)
+        .map_err(|_| CryptoError::AuthenticationFailed)?;
+
+    Ok(plaintext.to_vec())
+}
+
+/// Generate a random 96-bit nonce.
+///
+/// Uses SystemRandom from aws-lc-rs. Callers that store nonces in their own format use this
+/// rather than inventing one from a counter or a timestamp.
+pub fn random_nonce() -> Result<[u8; NONCE_LEN], CryptoError> {
+    let mut nonce = [0u8; NONCE_LEN];
+    SystemRandom::new()
+        .fill(&mut nonce)
+        .map_err(|_| CryptoError::Random("the system random source failed".to_owned()))?;
+
+    Ok(nonce)
+}
+
+/// SHA-256 digest of the input.
+///
+/// Uses SHA-256 from aws-lc-rs. Chunk hashes let a reader detect a swapped chunk even when
+/// each chunk authenticates on its own, because authentication alone does not bind a chunk
+/// to a position.
+pub fn sha256(data: &[u8]) -> [u8; 32] {
+    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, data);
+    let mut output = [0u8; 32];
+    output.copy_from_slice(digest.as_ref());
+    output
 }

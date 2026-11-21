@@ -7,7 +7,11 @@ rust-version.workspace = true
 
 [dependencies]
 dome-core = { path = "../dome-core" }
+dome-crypto = { path = "../dome-crypto" }
 thiserror.workspace = true
+
+[dev-dependencies]
+age = { version = "0.11", default-features = false }
 
 [lints]
 workspace = true

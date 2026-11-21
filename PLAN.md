@@ -32,7 +32,7 @@ verification is reproducible from a clean checkout.
 | --- | --- | --- |
 | Wave 0 + M1 (parsing, validation, CLI, CI) | T1, T3–T9 | **done** (8/8) |
 | Risk-death + decisions | T59–T62 | **done** (4/4) — spike, privilege ADR, CLI contract, hygiene |
-| **M2** format + crypto | T10–T14 | **2/5** — crypto + header layout done; writer/reader pending |
+| **M2** format + crypto | T10–T14 | **DONE** (5/5) — crypto, header, writer, reader, integration |
 | **M3** engine | T15–T21 | **DONE** (7/7) — real kernel boots in-engine, inside the cage |
 | M3 sign-off gate | T67 | **partial** — CPUID policy, DMA refusal, cage done; device-set pin, I/O rate limits, fuzz owed |
 | M4 chambers, cgroups, netns | T22–T28, T63–T64 | not started — ADR 0001 settled the privileges, T63 substrate is the entry point |
@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 146 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 156 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -408,12 +408,12 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T8: dome-test-utils crate [DONE]
 └── T9: M1 integration tests + round-trip validation [DONE — M1 COMPLETE]
 
-Wave M2 (Dome Foundation Format — 5 tasks, 3 parallel) — 2/5 done:
+Wave M2 (Dome Foundation Format — 5 tasks) — COMPLETE:
 ├── T10: dome-crypto crate (aws-lc-rs + age) [DONE]
 ├── T11: .dome format constants + header layout [DONE]
-├── T12: .dome writer (manifest, chunks, signatures) [deep]
-├── T13: .dome reader (parse, verify, decrypt) [deep]
-└── T14: M2 integration tests (round-trip, tamper, wrong key) [unspecified-high]
+├── T12: .dome writer [DONE]
+├── T13: .dome reader [DONE]
+└── T14: M2 integration tests [DONE — M2 COMPLETE]
 
 Wave M3 (Linux Native Engine — 7 tasks) — COMPLETE:
 ├── T15: KVM dependencies + unsafe override [DONE]
@@ -1300,7 +1300,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] `FoundationFormat` serialises to and from bytes, with pinned values
   - [x] The layout constants are asserted against the documented sizes
 
-- [ ] 12. **.dome Writer (Manifest + Chunks + Signatures)**
+- [x] 12. **.dome Writer (Manifest + Chunks + Signatures)**
 
   **What to do**:
   - Implement `dome-image/src/writer.rs`:
@@ -1329,6 +1329,8 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-crypto/src/lib.rs` — `seal_chunk()`, `sign_manifest()`
   - `.rules/images.md:13-22` — Container specification
 
+  **Completed** (2026), together with T13. `crates/dome-image/src/writer.rs`: header, sealed manifest, chunk table (offset/length/nonce/hash per 64 KiB chunk), chunk payloads, then an Ed25519 signature over every preceding byte. Signature placement means the chunk table cannot be edited without invalidating the file.
+
   **Acceptance Criteria**:
   - [ ] `DomeWriter` produces a valid `.dome` file
   - [ ] Written file has correct magic bytes, version, header layout
@@ -1353,7 +1355,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 13. **.dome Reader (Parse + Verify + Decrypt)**
+- [x] 13. **.dome Reader (Parse + Verify + Decrypt)**
 
   **What to do**:
   - Implement `dome-image/src/reader.rs`:
@@ -1386,6 +1388,8 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-image/src/format.rs` — Format layout
   - `crates/dome-crypto/src/lib.rs` — `unseal_chunk()`, `verify_manifest()`
   - `crates/dome-image/src/writer.rs` — Writer impl (to test round-trip)
+
+  **Completed** (2026). `crates/dome-image/src/reader.rs` verifies the signature **before parsing anything**, so no length or offset a hostile file declares is trusted before authentication. Each chunk must then pass both its GCM tag and its recorded plaintext hash: the nonce alone already binds a chunk to its ciphertext, and the hash binds it to its position.
 
   **Acceptance Criteria**:
   - [ ] `DomeReader::open()` parses a valid .dome file
@@ -1430,7 +1434,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 14. **M2 Integration Tests (Format + Crypto)**
+- [x] 14. **M2 Integration Tests (Format + Crypto)**
 
   **What to do**:
   - Create comprehensive test fixtures:
@@ -1461,6 +1465,8 @@ Max Concurrent: 6 (M1 wave)
   - `crates/dome-image/tests/writer_reader_roundtrip.rs` — From T12/T13
   - `crates/dome-crypto/tests/crypto_ops.rs` — Crypto test patterns
   - `tests/fixtures/linux-host/` — Fixture directory pattern
+
+  **Completed** (2026). `crates/dome-image/tests/m2_integration.rs` walks the real path: write a container, wrap its file key to an age recipient, then recover everything from the wrapped key alone. Includes the case where a key wrapped for someone else cannot open the file.
 
   **Acceptance Criteria**:
   - [ ] All M2 tests pass

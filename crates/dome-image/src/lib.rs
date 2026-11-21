@@ -1,5 +1,11 @@
 pub mod format;
 pub mod header;
+pub mod image_error;
+pub mod manifest;
+pub mod reader;
+pub mod writer;
+
+pub use image_error::ImageError;
 
 use std::path::{Path, PathBuf};
 

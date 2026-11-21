@@ -1,0 +1,18 @@
+# T12/T13/T14 — .dome writer, reader, integration
+# command: cargo test -p dome-image -p dome-crypto -j4
+
+a_single_chunk_round_trips ... ok
+a_payload_spanning_several_chunks_round_trips_in_order ... ok
+an_empty_payload_is_a_valid_container ... ok
+the_wrong_file_key_cannot_open_it ... ok
+the_wrong_public_key_is_rejected_before_anything_is_decrypted ... ok
+a_flipped_ciphertext_byte_breaks_the_signature ... ok
+a_forged_signature_is_rejected ... ok
+a_chunk_moved_out_of_position_is_caught_by_its_hash ... ok
+a_truncated_file_is_rejected ... ok
+the_file_framing_is_stable_across_two_identical_writes ... ok
+a_container_survives_wrap_write_export_and_import ... ok
+a_key_wrapped_for_someone_else_cannot_open_the_file ... ok
+
+test result: ok. 12 passed; 0 failed
+workspace total: 156
