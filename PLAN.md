@@ -15,7 +15,7 @@
 > - macOS (Apple Hypervisor) + Windows (Hyper-V) engines (M8)
 > - ARM64 foundations + Raspberry Pi OS userland (M9)
 >
-> **Estimated Effort**: Extra Large (66 implementation tasks + 4 review tasks) — see Revision 2 for the 8 added tasks
+> **Estimated Effort**: Extra Large (67 implementation tasks + 4 review tasks) — see Revision 2 for the 8 added tasks
 > **Parallel Execution**: YES — Wave 0 plus 9 milestone waves with intra-wave parallelism
 > **Critical Path**: T59 (KVM spike, risk-death) → T61 (CLI contract) → M1 (parsing) → M2 (format) → T63 (virtio substrate) → M3 (engine) → M4 (lifecycle) → M5-M9
 > **Hard gate**: M2 and later cannot be validated without a host that exposes `/dev/kvm`. T59 settles this before any format work begins.
@@ -298,6 +298,11 @@ Transform Dome from a read-only host capability probe into a complete sandbox en
 - M3 isolation claims — guest isolation not claimed until M4 sandboxing is complete
 - Board emulation claims — GPIO is proxying, not Raspberry Pi emulation
 - Claims that a `.seal.dome` is portable between hosts, engines, or architectures
+- DMA-capable apertures on a host without an enforced IOMMU
+- Adding a virtual device for convenience: devices are the escape surface, so each one needs
+  a threat-model entry and fuzz coverage first
+- Shipping a CPUID passthrough in place of a deny-by-default allowlist
+- Any claim of host-to-chamber confidentiality without SEV-SNP, TDX or CCA attestation
 - Claims that one foundation runs on multiple CPU architectures (it never does)
 - Claiming a boot task "done" from fixture tests alone, without a captured console log
   from a host with `/dev/kvm`
@@ -1716,6 +1721,13 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] 20. **Engine Process Sandbox (seccomp + Landlock)**
 
+  > **Extended by ADR 0002 (D)** — the cage is not just seccomp + Landlock. It also needs its
+  > own user/mount/pid/net namespace, a minimal read-only filesystem view, no capabilities,
+  > `PR_SET_NO_NEW_PRIVS`, `PR_SET_DUMPABLE = 0` and `RLIMIT_CORE = 0`. The last two are
+  > what stop a same-user hostile process from ptracing the engine or reading its memory via
+  > `/proc/pid/mem`, and stop a core dump from spilling guest RAM to disk. Rationale and
+  > citations in `docs/adr/0002-isolation-model.md`.
+
   **What to do**:
   - Add `seccompiler = "0.5"` and `landlock` to `dome-engine/Cargo.toml` (Linux-only deps)
   - Create `dome-engine/src/sandbox.rs`:
@@ -2530,8 +2542,10 @@ Max Concurrent: 6 (M1 wave)
   > **Rev 2 rescope**: blocked by **T63** (virtio substrate). "virtio-fs or 9p" hides a
   > device model either way — virtio-fs needs a FUSE daemon plus the virtio device, 9p
   > needs a server. Do not start until T63 has one virtio device working end to end.
-  > Choose **9p** first: it is strictly simpler and read-only is sufficient for the
-  > default aperture mode.
+  > **Revised after research (ADR 0002 G): use virtio-fs, not 9p.** 9p is a legacy debug
+  > protocol with a large parser surface; virtio-fs keeps its host-side server in a separate
+  > process. The earlier preference for 9p was about implementation simplicity, which is the
+  > wrong axis for the component that parses guest-controlled data.
 
   **What to do**:
   - Implement `dome-engine/src/apertures/files.rs`:
@@ -2652,6 +2666,11 @@ Max Concurrent: 6 (M1 wave)
 ---
 
 - [ ] 41. **PCI/USB Aperture Policy Model**
+
+  > **Gated by ADR 0002 (F)**: no DMA-capable aperture ships without an enforced IOMMU. This
+  > host exposes **zero** IOMMU groups, so PCI/USB/GPU passthrough is refused outright here —
+  > a DMA-capable device can read every chamber's memory, which destroys the isolation the
+  > product is built for. Model the policy types; make the engine refuse to instantiate them.
 
   **What to do**:
   - Extend `dome-device` with PCI/USB aperture types:
@@ -3428,6 +3447,43 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
+- [ ] 67. **Maximal-Isolation Baseline (cross-cutting, gates M3 sign-off)**
+
+  > Derived from research: see [`docs/adr/0002-isolation-model.md`](docs/adr/0002-isolation-model.md).
+  > The literature is consistent that isolation is won by **minimising what the sandbox can
+  > touch**, then assuming that boundary fails. Firecracker exposes three devices; gVisor's
+  > model minimises the host API reachable from the sandbox to defeat exploit chaining.
+
+  **What to do**:
+  - **Pin the device set** in code, not in prose: UART + virtio-mmio + virtio-blk only. Make
+    adding a device a compile-time decision (a closed enum / builder with no escape hatch)
+    so it cannot happen by accident.
+  - **CPUID allowlist**: start from a deny-by-default template and opt features in
+    deliberately. Keep the CET mask as the first entry and the spike as its justification.
+  - **Per-device I/O rate limiting**, so a malicious guest cannot monopolise the device loop.
+  - **Host-availability caps**: vCPU ceiling, boot timeout, and the cgroup limits from
+    ADR 0001. A hung chamber must be killable.
+  - **Refuse DMA apertures** when `/sys/kernel/iommu_groups` is empty, with a typed error
+    that names the missing IOMMU.
+  - **Fuzz the device parsers** (extends T56): any code that reads guest-controlled
+    descriptors gets a `cargo-fuzz` target.
+
+  **Must NOT do**:
+  - Do not enable SMM, nested virtualization, or PCI hole devices "for compatibility".
+  - Do not pass through CPUID wholesale.
+  - Do not claim host-confidentiality on hardware lacking SEV-SNP/TDX/CCA.
+
+  **Parallelization**: Can Run In Parallel: partially — the device pin and CPUID work follow
+  T63; the caps follow T22. **Blocks**: M3 sign-off. **Blocked By**: T16, T20, T22, T63.
+
+  **Acceptance Criteria**:
+  - [ ] `echo 1 > /dev/kvm`-style mistakes impossible: the device set is a closed type
+  - [ ] CPUID template has CET (and any other unimplemented feature) clear, asserted by test
+  - [ ] I/O rate limit enforced per device, with a test that floods and observes backpressure
+  - [ ] A chamber exceeding its vCPU/memory/PID cap is contained without host impact
+  - [ ] Requesting a PCI/USB aperture on this host fails with a typed `IoMmuUnavailable` error
+  - [ ] Every device parser has a fuzz target and a seed corpus
+
 ---
 
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)
@@ -3436,7 +3492,7 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, cargo test, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `evidence/`. Compare deliverables against plan.
-  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/66] | VERDICT: APPROVE/REJECT`
+  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/67] | VERDICT: APPROVE/REJECT`
 
 - [ ] F2. **Code Quality Review** — `unspecified-high`
   Run `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, `println!`/`eprintln!` in lib code, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (`data`/`result`/`item`/`temp`).
@@ -3448,7 +3504,7 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (`git diff --stat HEAD~N..HEAD`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
-  Output: `Tasks [N/66 compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
+  Output: `Tasks [N/67 compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
 ---
 
@@ -3492,7 +3548,7 @@ cargo check --target x86_64-pc-windows-msvc
 ### Final Checklist
 - [ ] All "Must Have" present
 - [ ] All "Must NOT Have" absent
-- [ ] All 66 tasks completed
+- [ ] All 67 tasks completed
 - [ ] T59 (KVM spike) completed on real KVM hardware, with console evidence committed
 - [ ] Every architecture-mismatch and missing-device path returns a typed error, not a panic
 - [ ] All tests pass (unit + integration + doc)
