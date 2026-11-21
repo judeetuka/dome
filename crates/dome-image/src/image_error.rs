@@ -33,4 +33,13 @@ pub enum ImageError {
     /// The file was structurally impossible.
     #[error("malformed container: {0}")]
     Malformed(String),
+
+    /// The filesystem failed while storing or reading a foundation.
+    #[error("io error on {path}: {source}")]
+    Io {
+        /// Path that failed.
+        path: String,
+        /// What the system reported.
+        source: std::io::Error,
+    },
 }

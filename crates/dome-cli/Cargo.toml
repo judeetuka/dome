@@ -25,3 +25,6 @@ dome-obfuscation = { path = "../dome-obfuscation" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dome-image = { path = "../dome-image" }

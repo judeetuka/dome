@@ -426,12 +426,15 @@ Wave M3 (Linux Native Engine — 7 tasks) — COMPLETE:
 
 Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
 ├── T22: cgroups v2 integration [DONE]
-├── T23: Network namespace integration (per-chamber netns) [deep]
+├── T23: Network namespace integration (per-chamber netns) [DONE]
 ├── T24: Chamber create orchestrator [DONE]
 ├── T25: Chamber run/stop lifecycle [DONE]
-├── T26: Chamber seal (save to .seal.dome) [deep]
-├── T27: Chamber export [deep]
-└── T28: M4 integration tests (enforcement, conflict, cleanup) [unspecified-high]
+├── T26: Chamber seal (save to .seal.dome) [DONE]
+├── T27: Chamber export [DONE — package format; export/import verbs owed]
+├── T28: M4 integration tests (enforcement, conflict, cleanup) [DONE — release loop + chamber lifecycle]
+├── T63: Virtio substrate (UART + virtio-mmio + initramfs path) [DONE]
+├── T64: Content-addressed foundation store + CoW overlays
+└── T69: Restart policy + host-restart reconciliation [DONE]
 
 Wave M5 (Minimal OS Builder — 4 tasks, 2 parallel):
 ├── T29: Buildroot recipe for minimal foundations [unspecified-high]

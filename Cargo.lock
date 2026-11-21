@@ -516,6 +516,7 @@ dependencies = [
  "age",
  "dome-core",
  "dome-crypto",
+ "libc",
  "thiserror 2.0.21",
 ]
 

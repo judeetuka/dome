@@ -213,3 +213,62 @@ fn doctor_toml_declares_a_schema_version() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn foundation_list_on_an_empty_store_says_so() {
+    let dir = std::env::temp_dir().join(format!("dome-store-empty-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let output = run(argv(&[
+        "foundation",
+        "list",
+        "--store",
+        dir.to_str().unwrap(),
+    ]))
+    .expect("list");
+    assert!(output.contains("no foundations"), "{output}");
+}
+
+#[test]
+fn foundation_prune_on_an_empty_store_says_so() {
+    let dir = std::env::temp_dir().join(format!("dome-store-prune-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let output = run(argv(&[
+        "foundation",
+        "prune",
+        "--store",
+        dir.to_str().unwrap(),
+    ]))
+    .expect("prune");
+    assert!(output.contains("nothing to prune"), "{output}");
+}
+
+#[test]
+fn foundation_list_reports_what_is_stored() {
+    let dir = std::env::temp_dir().join(format!("dome-store-full-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+
+    let image = dir.join("base.img");
+    std::fs::write(&image, vec![0xEEu8; 2048]).expect("image");
+
+    let store = dome_image::store::FoundationStore::at(dir.join("store"));
+    store
+        .insert(&image, dome_image::store::ARCH_X86_64, "alpine")
+        .expect("insert");
+
+    let output = run(argv(&[
+        "foundation",
+        "list",
+        "--store",
+        dir.join("store").to_str().unwrap(),
+    ]))
+    .expect("list");
+
+    assert!(output.contains("x86_64"), "{output}");
+    assert!(output.contains("alpine"), "{output}");
+    assert!(output.contains("2.0 KiB"), "a readable size: {output}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

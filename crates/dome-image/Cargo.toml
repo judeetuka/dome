@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+libc = "0.2"
 dome-core = { path = "../dome-core" }
 dome-crypto = { path = "../dome-crypto" }
 thiserror.workspace = true
@@ -13,5 +14,7 @@ thiserror.workspace = true
 [dev-dependencies]
 age = { version = "0.11", default-features = false }
 
-[lints]
-workspace = true
+# [lints] workspace = true cannot be combined with an override: the manifest will not parse.
+# unsafe_code stays at warn rather than allow so every block is visible in review.
+[lints.rust]
+unsafe_code = "warn"

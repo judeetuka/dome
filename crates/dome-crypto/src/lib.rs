@@ -363,6 +363,42 @@ pub fn random_nonce() -> Result<[u8; NONCE_LEN], CryptoError> {
 /// Uses SHA-256 from aws-lc-rs. Chunk hashes let a reader detect a swapped chunk even when
 /// each chunk authenticates on its own, because authentication alone does not bind a chunk
 /// to a position.
+/// A streaming SHA-256, for content that is too large to hold in memory.
+///
+/// Foundation images run to hundreds of megabytes, so digesting one must not mean allocating
+/// it. The result is identical to [`sha256`] on the same bytes.
+pub struct Sha256 {
+    context: aws_lc_rs::digest::Context,
+}
+
+impl Default for Sha256 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Sha256 {
+    /// Start a digest.
+    pub fn new() -> Self {
+        Self {
+            context: aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256),
+        }
+    }
+
+    /// Absorb more bytes.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.context.update(bytes);
+    }
+
+    /// Finish and return the digest.
+    pub fn finish(self) -> [u8; 32] {
+        let digest = self.context.finish();
+        let mut output = [0u8; 32];
+        output.copy_from_slice(digest.as_ref());
+        output
+    }
+}
+
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, data);
     let mut output = [0u8; 32];

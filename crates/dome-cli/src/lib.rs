@@ -187,6 +187,20 @@ enum FoundationAction {
         #[arg(value_name = "FILE_DOME")]
         file: PathBuf,
     },
+
+    /// List the foundations in the store
+    List {
+        /// Store directory; defaults to the user's data directory
+        #[arg(long, value_name = "DIR")]
+        store: Option<PathBuf>,
+    },
+
+    /// Remove foundations no chamber references
+    Prune {
+        /// Store directory
+        #[arg(long, value_name = "DIR")]
+        store: Option<PathBuf>,
+    },
 }
 
 /// Output format for machine-readable or human-readable text.
@@ -226,6 +240,24 @@ pub fn run(args: Vec<String>) -> Result<String, CliError> {
             }
             _ => Err(CliError::Usage(error.render().to_string())),
         },
+    }
+}
+
+/// A size a human can read.
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[0])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 
@@ -371,7 +403,52 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             release::inspect(&artifact, &release::KeyFiles::in_dir(&keys)).map_err(CliError::Failed)
         }
         Commands::Build { .. } => Err(CliError::NotYetImplemented("build")),
-        Commands::Foundation { .. } => Err(CliError::NotYetImplemented("foundation")),
+        Commands::Foundation { action } => match action {
+            FoundationAction::Info { .. } => Err(CliError::NotYetImplemented("foundation info")),
+
+            FoundationAction::List { store } => {
+                let store = dome_image::store::FoundationStore::at(
+                    store.unwrap_or_else(dome_image::store::FoundationStore::default_root),
+                );
+
+                let entries = store
+                    .list()
+                    .map_err(|error| CliError::Failed(error.to_string()))?;
+                if entries.is_empty() {
+                    return Ok("no foundations stored".to_owned());
+                }
+
+                let mut report = String::from(
+                    "DIGEST                                                            ARCH      SIZE        REFS  NAME\n",
+                );
+                for entry in entries {
+                    report.push_str(&format!(
+                        "{}  {:<9} {:<11} {:<5} {}\n",
+                        entry.digest,
+                        entry.arch,
+                        format_size(entry.size),
+                        entry.references.len(),
+                        entry.name
+                    ));
+                }
+                Ok(report)
+            }
+
+            FoundationAction::Prune { store } => {
+                let store = dome_image::store::FoundationStore::at(
+                    store.unwrap_or_else(dome_image::store::FoundationStore::default_root),
+                );
+
+                let removed = store
+                    .prune()
+                    .map_err(|error| CliError::Failed(error.to_string()))?;
+                Ok(if removed.is_empty() {
+                    "nothing to prune".to_owned()
+                } else {
+                    format!("removed {} foundation(s)", removed.len())
+                })
+            }
+        },
     }
 }
 

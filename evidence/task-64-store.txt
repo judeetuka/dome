@@ -1,0 +1,19 @@
+# T64 - content-addressed foundation store and chamber layers
+# command: cargo test -p dome-image --test store -j4
+
+# store (10 tests):
+the_same_bytes_are_stored_once ... ok
+different_bytes_get_different_digests ... ok
+architecture_is_part_of_the_key ... ok
+a_chamber_gets_a_layer_that_leaves_the_foundation_alone ... ok
+two_chambers_share_one_foundation ... ok
+the_store_reports_whether_layers_actually_share_disk ... ok
+prune_removes_what_nothing_references_and_keeps_the_rest ... ok
+releasing_a_chamber_makes_its_foundation_collectable ... ok
+a_hostile_chamber_name_cannot_escape_the_layer_directory ... ok
+a_digest_that_was_never_stored_is_reported_as_missing ... ok
+
+# filesystem under the store on this host: ext4
+# ext4 cannot share extents, so layers are full copies here and the store reports
+# strategy=copy rather than implying the btrfs case. On btrfs/xfs/zfs the same call
+# returns strategy=reflink and layers cost no additional blocks.
