@@ -28,33 +28,49 @@
 > claim below was checked against the live `index.crates.io` and this repository's
 > own toolchain (`cargo 1.100.0`, `rustc 1.100.0`), not recalled from memory.
 
-### 1. Environment gate (BLOCKER — resolve via T59 before T10)
+### 1. Environment gate (probed; revised)
 
-The development host was probed directly and **cannot execute the M3/M4 engine path**:
+> **Correction (2026).** An earlier revision of this section claimed this host had no
+> `/dev/kvm` and a read-only cgroup tree. That reading came from a restricted sandbox
+> (a container with the device and cgroup hierarchy masked), not from the real host. The
+> check below is from the actual machine and includes a real KVM ioctl round trip rather
+> than an `exists()` test.
 
 | Check | Result | Consequence |
 |---|---|---|
-| `systemd-detect-virt` | `container-other` | containerized workspace |
-| `/dev/kvm` | **absent** (`kvm_intel` loaded on host, device not passed in) | `LinuxEngine::new()` fails `ENOENT`; no boot can be attempted |
-| `mkdir /sys/fs/cgroup/x` | **`EROFS`** (cgroup2 read-only) | `ChamberCgroup::create()` cannot be tested |
-| `unshare -Urn ip link add veth` | **works** | netns **is** testable through user namespaces |
-| `index.crates.io` | reachable (HTTP 200) | dependency work unblocked |
-| `cmake`, `perl`, `pkg-config`, `clang`, `gcc` | present | `aws-lc-sys` can build |
-| `nasm` | **absent** | do not introduce NASM-syntax assembly |
+| `systemd-detect-virt` | `none` | **bare metal**, no nested hypervisor in the way |
+| `open("/dev/kvm", O_RDWR)` | works | the engine can talk to KVM |
+| `KVM_GET_API_VERSION` | `12` | ABI present and as expected |
+| `KVM_GET_VCPU_MMAP_SIZE` | `12288` | the run struct is mappable |
+| `KVM_CREATE_VM` | **succeeds** | real VM creation, not just a device node |
+| `mkdir /sys/fs/cgroup/x` | `EACCES` (uid 1000, `Delegate=no`) | **cgroups block on the T60 decision**, not on hardware |
+| `ip netns add` | `EACCES` | no `CAP_NET_ADMIN` yet — same cause |
+| `unshare -Urn ip link add veth` | **works** | netns is testable today via user namespaces |
+| CPU / memory | 14 cores, 15 GiB | enough for real boot tests |
+| `cmake`, `perl`, `pkg-config`, `clang`, `gcc` | present | `aws-lc-sys` and KVM builds work |
+| `nasm` | absent | do not introduce NASM-syntax assembly |
+| `/boot` | empty | no local kernel image; T59 downloads one |
 
-**Rule**: any QA scenario in M3, M4, M6, M7, M9 that requires a real boot is marked
-`#[ignore]` with the reason string `requires host with /dev/kvm`, and is listed in
-`docs/known-limits.md`. A task is never marked green on the strength of fixture tests.
-The bar for "Linux engine verified" is one real kernel boot, on real KVM hardware,
-with a captured console log committed under `evidence/`.
+**Rules**:
+- The bar for "Linux engine verified" is a real kernel boot with a captured console log
+  committed under `evidence/` — never a fixture-only pass.
+- Anything needing cgroup or netns privilege is blocked on **T60**, not on hardware.
+- **T59 (KVM spike) is unblocked** and must report before M2 starts.
 
 ### 2. Dependency corrections (Rev 1 pins versions that do not exist)
 
-Latest published at the time of this revision:
+Latest published at the time of this revision.
+
+> **Method note (learned the hard way).** crates.io index files are ordered by publish
+> time, not by version, and a large one truncates on a read timeout. `tail -1` therefore
+> reports a stale version — that is how revision 2 of this document wrongly declared
+> `vm-memory 0.18` unreleased, and then pinned 0.17 while `linux-loader` pulled 0.18
+> alongside it. Trust `cargo tree` / `Cargo.lock` after adding a dependency over any
+> hand-read index.
 
 | Crate | Rev 1 | Latest published | Action |
 |---|---|---|---|
-| `vm-memory` | 0.18 | **0.17.2** | 0.18 was never released. Use `0.17` |
+| `vm-memory` | 0.18 | **0.18.0** | Rev 1 was right. **Must** be 0.18: `linux-loader 0.14` depends on 0.18, and a 0.17 pin silently links two incompatible copies |
 | `kvm-ioctls` | 0.24 | 0.25.1 | use `0.25` |
 | `kvm-bindings` | 0.14 | must match `kvm-ioctls` | pin to whatever 0.25 requires |
 | `linux-loader` | 0.13 | 0.14.0 | use `0.14` |
@@ -320,7 +336,7 @@ framebuffer dumps, full `strace` output) are gitignored.
 
 ```
 Wave 0 (Kill the risk before building anything — 4 tasks, all parallel):
-├── T59: KVM spike — open /dev/kvm, boot a kernel, UART on stdout [deep]  ← GATES ALL OF M2+
+├── T59: KVM spike — plumbing PROVEN, kernel boot pending [IN PROGRESS]
 ├── T60: Capability acquisition decision (cgroup delegation + CAP_NET_ADMIN) [deep]  ← GATES M4
 ├── T61: CLI contract doc — pins the command grammar [DONE]  ← gates T5, T29
 └── T62: Repo hygiene — remainder: LICENSE, assets/, evidence policy [quick]
@@ -3118,16 +3134,48 @@ Max Concurrent: 6 (M1 wave)
   **Parallelization**: Can Run In Parallel: NO — this is the single risk gate.
   **Blocks**: T10 (do not start M2 before this reports). **Blocked By**: nothing.
 
+  **Status: PARTIAL — plumbing proven, kernel boot not yet reached** (2026).
+  Findings recorded in [`docs/spike-kvm.md`](docs/spike-kvm.md). Evidence:
+  `evidence/task-59-selftest.txt` (pass) and `evidence/task-59-kernel-attempt.txt` (fails).
+
+  Environment was re-probed first: **this host does have working KVM** — bare metal,
+  `KVM_GET_API_VERSION` = 12, `KVM_CREATE_VM` succeeds. An earlier revision of this plan
+  claimed otherwise based on a restricted sandbox; that was wrong and is corrected.
+
+  **Proven working** (self-test gate, `kvm_spike selftest`, passes in ~240 µs):
+  VM creation, 512 MiB guest region, CPUID applied (57 entries), 32-bit protected-mode
+  bring-up with flat segments, guest code execution, serial IO exits, and `KVM_EXIT_HLT`.
+
+  **Not yet working**: the Alpine 6.12 bzImage runs but never prints and never exits.
+  The vCPU is demonstrably executing real instructions (PCI config reads on `0xCFC` were
+  observed), so the failure is in the boot handoff, not the plumbing.
+
+  Six hazards surfaced, each real work in M3 and each now written down:
+  1. `KVM_EXIT_IO` batches — 16 bytes sent, 15 received until `io.count` is honoured.
+  2. A UART without LSR/IIR emulation makes the guest silently discard all output.
+  3. A vCPU with no CPUID applied cannot run a modern kernel at all.
+  4. `KVM_RUN` blocks forever; a deadline between exits never fires.
+  5. `BzImage::load` rejects a `kernel_offset` below `highmem_start_address`.
+  6. `dome-engine` genuinely needs `unsafe` (`set_user_memory_region`), and `clippy -D
+     warnings` promotes the crate's `warn` to an error, so the single unsafe site carries
+     a justified `#[allow(unsafe_code)]`. Revision 2 section 3's procedure was correct.
+
+  **Effect on the estimate**: Rev 1 put "boot a minimal foundation" inside a 7-task
+  milestone. ~250 lines bought a vCPU that executes code and does serial IO — the easy
+  half. Reaching printed kernel output additionally needs a correct boot-protocol handoff,
+  a boot_params with a memory map, and a UART model. Split M3 into a boot-protocol task
+  and a device-model task; do not merge them.
+
   **Acceptance Criteria**:
-  - [ ] Kernel console output captured to `evidence/task-59-console.log`
-  - [ ] Elapsed time recorded in `docs/spike-kvm.md`
-  - [ ] M3 estimates confirmed, or restated against the measured cost
-  - [ ] On a host without `/dev/kvm`, the example exits with a typed error and the
-        escalation was raised with the user
+  - [x] Elapsed cost measured and recorded in `docs/spike-kvm.md`
+  - [x] M3 estimates restated against measured cost (split into two tasks)
+  - [x] KVM plumbing independently verified by a self-test that fails loudly
+  - [ ] **Kernel console output captured** — blocked; next attempt is the 16-bit real-mode
+        entry path, then an explicit e820 map
+  - [ ] Host-without-`/dev/kvm` exits with a typed error (currently a bare `?`)
 
-  **Commit**: YES — `chore(m0): add timeboxed KVM spike and findings`
-
----
+  **Do not mark M3 green on the strength of the self-test.** The self-test proves our
+  plumbing; it does not prove a boot.
 
 - [ ] 60. **Capability Acquisition Decision (cgroups + CAP_NET_ADMIN)**
 

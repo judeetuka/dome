@@ -9,5 +9,17 @@ rust-version.workspace = true
 thiserror = { workspace = true }
 dome-core = { path = "../dome-core" }
 
-[lints]
-workspace = true
+# KVM crates are Linux-only; other platforms get their own engine back end.
+[target.'cfg(target_os = "linux")'.dependencies]
+kvm-bindings = "0.14"
+kvm-ioctls = "0.25"
+linux-loader = { version = "0.14", features = ["bzimage", "elf"] }
+vm-memory = { version = "0.18", features = ["backend-mmap"] }
+vmm-sys-util = "0.15"
+
+# CRITICAL: Per Revision 2 section 3, this crate must NOT keep
+# `[lints] workspace = true` — combining it with an override is a manifest parse error.
+# `unsafe_code = "warn"` (not "allow") keeps every unsafe block visible in review.
+# The workspace `forbid` still protects all other crates.
+[lints.rust]
+unsafe_code = "warn"
