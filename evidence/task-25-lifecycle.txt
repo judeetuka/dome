@@ -1,0 +1,21 @@
+# T25 — chamber run/stop lifecycle and health
+# command: cargo test -p dome-supervisor -j4
+
+stop sequence (real child processes):
+  a_cooperative_child_exits_within_the_grace_period ... ok
+  a_child_that_ignores_the_signal_is_forced_after_the_grace_period ... ok
+  with_no_grace_period_it_waits_instead_of_forcing ... ok
+  usage_is_read_from_the_cgroup ... ok
+
+health rules (Docker defaults 30s/30s/3/0s):
+  health_starts_unknown_to_the_tracker_until_the_first_probe ... ok
+  a_success_makes_it_healthy ... ok
+  consecutive_failures_reach_unhealthy_at_the_retry_limit ... ok
+  a_success_resets_the_failure_count ... ok
+  failures_during_the_start_period_are_not_counted ... ok
+  a_success_inside_the_start_period_ends_it ... ok
+  the_default_stop_policy_matches_dockers_behaviour ... ok
+
+# sources consulted:
+#   docs.docker.com/reference/cli/docker/container/stop
+#   docs.docker.com/reference/dockerfile (HEALTHCHECK)

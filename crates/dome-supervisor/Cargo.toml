@@ -11,5 +11,8 @@ dome-net = { path = "../dome-net" }
 thiserror.workspace = true
 libc = "0.2"
 
+[dev-dependencies]
+libc = "0.2"
+
 [lints.rust]
 unsafe_code = "warn"

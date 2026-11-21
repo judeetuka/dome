@@ -428,7 +428,7 @@ Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
 ├── T22: cgroups v2 integration [DONE]
 ├── T23: Network namespace integration (per-chamber netns) [deep]
 ├── T24: Chamber create orchestrator [DONE]
-├── T25: Chamber run/stop lifecycle [deep]
+├── T25: Chamber run/stop lifecycle [DONE]
 ├── T26: Chamber seal (save to .seal.dome) [deep]
 ├── T27: Chamber export [deep]
 └── T28: M4 integration tests (enforcement, conflict, cleanup) [unspecified-high]
@@ -2230,7 +2230,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 25. **Chamber Run/Stop Lifecycle**
+- [x] 25. **Chamber Run/Stop Lifecycle**
 
   **What to do**:
   - Implement remaining lifecycle methods in `ChamberOrchestrator`:
@@ -2248,6 +2248,41 @@ Max Concurrent: 6 (M1 wave)
   **Recommended Agent Profile**: `deep` — process lifecycle, async
   **Parallelization**: Can Run In Parallel NO | Blocks: T26, T27, T28 | Blocked By: T24
   **References**: `tokio` docs — `tokio::task::spawn_blocking` for sync VCPU loop; `crates/dome-supervisor/src/lib.rs:4-11` — `ChamberState` transitions
+
+  **Done** (2026). `crates/dome-supervisor/src/lifecycle.rs`, with the stop sequence in
+  `chamber.rs`. **Eleven tests**, three of which drive a real child process.
+
+  **Researched, not assumed.** The design follows the Docker documentation because the
+  product question was "how does a container decide it is done":
+
+  | Docker | Dome |
+  | --- | --- |
+  | container runs until its main process exits; nothing terminates it for being idle or unhealthy | chamber runs until its guest stops; no idle timeout |
+  | `docker stop`: SIGTERM, then grace, then SIGKILL; `--timeout -1` waits forever | `StopPolicy { signal: SIGTERM, grace: Some(10s) }`; `grace: None` waits |
+  | health is a status *alongside* the state: starting → healthy/unhealthy; defaults 30s/30s/3/0s | `HealthTracker` with the same defaults, and it never reaches the lifecycle |
+  | restart policy decides what happens after exit, not when to exit | not implemented; deliberately out of scope |
+
+  **Answering the stuck-chamber question with that evidence:** a wedged chamber becomes
+  `Unresponsive` — a reported observation, never an automatic stop. Docker does not kill a
+  container for being unhealthy or idle, and silently reaping a wedged chamber would hide the
+  bug. `dome stop` remains the only thing that ends one.
+
+  **Answering the idle-window question:** configurable, and **off by default**. CPU and memory
+  are read from the cgroup (`cpu.stat`, `memory.current`) and reported as usage; usefulness
+  of "no CPU progress" depends on the workload, so it stays an observation rather than a
+  verdict.
+
+  One specification detail a test caught: my tracker keyed the start period off elapsed time
+  alone. Docker also says a success during the start period **ends** it, so subsequent
+  failures count even though the clock is still inside the window. The tracker now records
+  that a probe has succeeded.
+
+  **Acceptance Criteria**:
+  - [x] A cooperative child exits within the grace period, unforced
+  - [x] A child that ignores SIGTERM is forced after the grace period
+  - [x] `grace: None` waits instead of forcing
+  - [x] Usage is read from the kernel's cgroup counters
+  - [x] Health rules match the documented behaviour, including the start-period rule
 
   **Acceptance Criteria**:
   - [ ] `run()` starts VCPU loop in a tokio task

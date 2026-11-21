@@ -1,6 +1,7 @@
 pub mod cgroup;
 pub mod chamber;
 pub mod frame;
+pub mod lifecycle;
 pub mod network;
 pub mod relay;
 

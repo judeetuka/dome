@@ -19,6 +19,7 @@ use dome_core::{ChamberId, ResourceLimits};
 use dome_net::PerimeterPolicy;
 
 use crate::cgroup::{ChamberCgroup, SupervisorError};
+use crate::lifecycle::{StopOutcome, StopPolicy};
 use crate::network::ChamberNetwork;
 
 /// File descriptor the relay control channel arrives on inside the engine process.
@@ -106,6 +107,80 @@ impl Chamber {
         drop(control);
 
         Ok(child)
+    }
+
+    /// Stop the engine the way `docker stop` stops a container.
+    ///
+    /// Ask with a signal, wait out the grace period, then force by killing the whole cgroup.
+    /// With `grace: None` it waits indefinitely, which is what `docker stop --timeout -1`
+    /// does.
+    pub fn stop(
+        &self,
+        child: &mut Child,
+        policy: StopPolicy,
+    ) -> Result<StopOutcome, SupervisorError> {
+        let pid = child.id() as i32;
+
+        // SAFETY: the pid belongs to a child this process spawned.
+        #[allow(unsafe_code)]
+        let sent = unsafe { libc::kill(pid, policy.signal) };
+        if sent != 0 {
+            let error = io::Error::last_os_error();
+            // ESRCH means it already exited, which is a fine outcome for a stop request.
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(SupervisorError::Spawn {
+                    program: format!("pid {pid}"),
+                    reason: error.to_string(),
+                });
+            }
+        }
+
+        let Some(grace) = policy.grace else {
+            let status = child.wait().map_err(|error| SupervisorError::Spawn {
+                program: format!("pid {pid}"),
+                reason: error.to_string(),
+            })?;
+            return Ok(StopOutcome {
+                code: status.code(),
+                forced: false,
+            });
+        };
+
+        let deadline = std::time::Instant::now() + grace;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return Ok(StopOutcome {
+                        code: status.code(),
+                        forced: false,
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return Err(SupervisorError::Spawn {
+                        program: format!("pid {pid}"),
+                        reason: error.to_string(),
+                    });
+                }
+            }
+
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        // The grace period expired: force it, which also catches children the signal missed.
+        self.cgroup.kill_all()?;
+        let status = child.wait().map_err(|error| SupervisorError::Spawn {
+            program: format!("pid {pid}"),
+            reason: error.to_string(),
+        })?;
+
+        Ok(StopOutcome {
+            code: status.code(),
+            forced: true,
+        })
     }
 
     /// Remove the cgroup. The namespace disappears with the last process in it.

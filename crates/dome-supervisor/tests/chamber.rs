@@ -6,6 +6,7 @@ use dome_core::{ChamberId, CpuCount, MemorySize, ResourceLimits, StorageSize};
 use dome_net::PerimeterPolicy;
 use dome_supervisor::cgroup::SupervisorError;
 use dome_supervisor::chamber::{CONTROL_FD, Chamber};
+use dome_supervisor::lifecycle::StopPolicy;
 
 fn limits() -> ResourceLimits {
     ResourceLimits::new(
@@ -134,4 +135,128 @@ fn destroying_a_chamber_removes_its_cgroup() {
 
     chamber.destroy().expect("destroy");
     assert!(!path.exists(), "cgroup should be gone after destroy");
+}
+
+#[test]
+fn a_cooperative_child_exits_within_the_grace_period() {
+    let Ok(chamber) = chamber("test-stop-cooperative") else {
+        eprintln!("skipping: no writable delegated cgroup subtree");
+        return;
+    };
+
+    let (_parent_end, child_end) = UnixStream::pair().expect("socketpair");
+    let mut child = chamber
+        .start_engine(
+            std::path::Path::new("/bin/sh"),
+            &["-c".to_owned(), "sleep 30".to_owned()],
+            child_end,
+        )
+        .expect("start engine");
+
+    let policy = StopPolicy {
+        grace: Some(std::time::Duration::from_secs(5)),
+        ..StopPolicy::default()
+    };
+
+    let outcome = chamber.stop(&mut child, policy).expect("stop");
+    assert!(
+        !outcome.forced,
+        "a child that honours SIGTERM should not need forcing"
+    );
+
+    chamber.destroy().expect("destroy");
+}
+
+#[test]
+fn a_child_that_ignores_the_signal_is_forced_after_the_grace_period() {
+    let Ok(chamber) = chamber("test-stop-forced") else {
+        eprintln!("skipping: no writable delegated cgroup subtree");
+        return;
+    };
+
+    let (_parent_end, child_end) = UnixStream::pair().expect("socketpair");
+    // Trap and ignore SIGTERM: only the forced path can end this one.
+    let mut child = chamber
+        .start_engine(
+            std::path::Path::new("/bin/sh"),
+            &["-c".to_owned(), "trap '' TERM; sleep 30".to_owned()],
+            child_end,
+        )
+        .expect("start engine");
+
+    let policy = StopPolicy {
+        grace: Some(std::time::Duration::from_millis(200)),
+        ..StopPolicy::default()
+    };
+
+    let started = std::time::Instant::now();
+    let outcome = chamber.stop(&mut child, policy).expect("stop");
+
+    assert!(outcome.forced, "a child ignoring SIGTERM must be forced");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the grace period should be short here"
+    );
+
+    chamber.destroy().expect("destroy");
+}
+
+#[test]
+fn with_no_grace_period_it_waits_instead_of_forcing() {
+    let Ok(chamber) = chamber("test-stop-indefinite") else {
+        eprintln!("skipping: no writable delegated cgroup subtree");
+        return;
+    };
+
+    let (_parent_end, child_end) = UnixStream::pair().expect("socketpair");
+    let mut child = chamber
+        .start_engine(
+            std::path::Path::new("/bin/sh"),
+            &["-c".to_owned(), "sleep 30".to_owned()],
+            child_end,
+        )
+        .expect("start engine");
+
+    let policy = StopPolicy {
+        grace: None,
+        ..StopPolicy::default()
+    };
+
+    let outcome = chamber.stop(&mut child, policy).expect("stop");
+    assert!(
+        !outcome.forced,
+        "no grace period means the force path is unreachable"
+    );
+
+    chamber.destroy().expect("destroy");
+}
+
+#[test]
+fn usage_is_read_from_the_cgroup() {
+    let Ok(chamber) = chamber("test-usage") else {
+        eprintln!("skipping: no writable delegated cgroup subtree");
+        return;
+    };
+
+    let (_parent_end, child_end) = UnixStream::pair().expect("socketpair");
+    let mut child = chamber
+        .start_engine(
+            std::path::Path::new("/bin/sh"),
+            &["-c".to_owned(), "sleep 5".to_owned()],
+            child_end,
+        )
+        .expect("start engine");
+
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let usage = chamber.cgroup().usage().expect("usage");
+
+    // The child is in this cgroup, so memory must be accounted to it.
+    assert!(
+        usage.memory_bytes > 0,
+        "expected memory usage, got {usage:?}"
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+    chamber.destroy().expect("destroy");
 }

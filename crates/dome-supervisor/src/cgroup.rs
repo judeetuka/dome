@@ -161,6 +161,11 @@ impl ChamberCgroup {
         self.write("cgroup.procs", &pid.to_string())
     }
 
+    /// Kill every process in the cgroup, the analogue of \`SIGKILL\` for the whole tree.
+    pub fn kill_all(&self) -> Result<(), SupervisorError> {
+        self.write("cgroup.kill", "1")
+    }
+
     /// Kill everything still inside, then remove the cgroup.
     ///
     /// `cgroup.kill` is written first because a cgroup with live processes cannot be
