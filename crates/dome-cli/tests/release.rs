@@ -6,7 +6,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use dome_cli::release::{KeyFiles, ReleaseOptions, inspect, key_file_for, release};
+use dome_cli::release::{
+    KeyFiles, ReleaseOptions, foundation_dir, inspect, key_file_for, release, resolve_boot,
+};
 
 fn scratch(name: &str) -> PathBuf {
     let unique = format!("dome-release-{name}-{}", std::process::id());
@@ -30,7 +32,9 @@ fn write_cell(dir: &Path) -> PathBuf {
     let path = dir.join("example.cell.toml");
     std::fs::write(
         &path,
-        "[cell]\nfoundation = \"dome/alpine:3.20\"\nmemory_mib = 64\n",
+        // memory_mib belongs under limits: release now parses the blueprint, so an invalid
+        // cell is caught here rather than producing an artifact nobody can boot.
+        "[cell]\nfoundation = \"dome/alpine:3.20\"\n\n[limits]\nmemory_mib = 64\nstorage_mib = 256\ncpus = 1\n",
     )
     .expect("cell");
     path
@@ -95,7 +99,8 @@ fn a_release_is_portable_by_default_and_runs_here() {
     let cell = write_cell(&dir);
     let artifact = dir.join("example.dome");
 
-    let mut options = ReleaseOptions::new(&cell, &kernel, &artifact, keys.clone());
+    let mut options = ReleaseOptions::new(&cell, &artifact, keys.clone());
+    options.kernel = Some(kernel.clone());
     options.memory_mib = 64;
     options.timeout = Duration::from_secs(3);
 
@@ -129,7 +134,8 @@ fn a_sealed_release_is_produced_here_but_cannot_run_here() {
     let cell = write_cell(&dir);
     let artifact = dir.join("sealed.dome");
 
-    let mut options = ReleaseOptions::new(&cell, &kernel, &artifact, keys.clone());
+    let mut options = ReleaseOptions::new(&cell, &artifact, keys.clone());
+    options.kernel = Some(kernel.clone());
     options.memory_mib = 64;
     options.timeout = Duration::from_secs(3);
     options.sealed = true;
@@ -159,7 +165,8 @@ fn inspect_refuses_a_tampered_release() {
     let cell = write_cell(&dir);
     let artifact = dir.join("example.dome");
 
-    let mut options = ReleaseOptions::new(&cell, &kernel, &artifact, keys.clone());
+    let mut options = ReleaseOptions::new(&cell, &artifact, keys.clone());
+    options.kernel = Some(kernel.clone());
     options.memory_mib = 64;
     options.timeout = Duration::from_secs(3);
     release(&options).expect("release");
@@ -172,6 +179,132 @@ fn inspect_refuses_a_tampered_release() {
 
     let error = inspect(&artifact, &keys).unwrap_err();
     assert!(error.contains("cannot open the release"), "{error}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- the kernel comes from the foundation, not from the command line ---
+
+const CELL_WITH_FOUNDATION: &str = "[cell]\nfoundation = \"dome/fixture:test\"\n\n[limits]\nmemory_mib = 64\nstorage_mib = 256\ncpus = 1\n";
+
+#[test]
+fn foundation_names_map_to_directories_predictably() {
+    let root = Path::new("/foundations");
+
+    // The mapping is a contract a build step will have to honour, so it is pinned.
+    assert_eq!(
+        foundation_dir(root, "dome/fixture:test"),
+        root.join("dome-fixture-test")
+    );
+    assert_eq!(foundation_dir(root, "alpine"), root.join("alpine"));
+}
+
+#[test]
+fn the_cell_supplies_the_kernel_when_none_is_given() {
+    let dir = scratch("foundation-ok");
+    let foundations = dir.join("foundations");
+    let installed = foundation_dir(&foundations, "dome/fixture:test");
+    std::fs::create_dir_all(&installed).expect("foundation dir");
+
+    let source = kernel().expect("fixture kernel");
+    std::fs::copy(&source, installed.join("vmlinuz")).expect("install kernel");
+
+    let (resolved, initramfs) = resolve_boot(CELL_WITH_FOUNDATION, None, None, &foundations)
+        .expect("the foundation should supply the kernel");
+
+    assert_eq!(resolved, installed.join("vmlinuz"));
+    assert!(initramfs.is_none(), "no initramfs was installed");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_installed_initramfs_is_picked_up_automatically() {
+    let dir = scratch("foundation-initramfs");
+    let foundations = dir.join("foundations");
+    let installed = foundation_dir(&foundations, "dome/fixture:test");
+    std::fs::create_dir_all(&installed).expect("foundation dir");
+
+    std::fs::copy(kernel().expect("fixture kernel"), installed.join("vmlinuz")).expect("kernel");
+    std::fs::write(installed.join("initramfs.cpio.gz"), b"not really a cpio").expect("initramfs");
+
+    let (_, initramfs) =
+        resolve_boot(CELL_WITH_FOUNDATION, None, None, &foundations).expect("resolve");
+
+    assert_eq!(initramfs, Some(installed.join("initramfs.cpio.gz")));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_missing_foundation_names_what_is_expected() {
+    let dir = scratch("foundation-missing");
+    let foundations = dir.join("foundations");
+
+    let error = resolve_boot(CELL_WITH_FOUNDATION, None, None, &foundations).unwrap_err();
+
+    assert!(error.contains("is not installed"), "{error}");
+    assert!(
+        error.contains("dome-fixture-test"),
+        "the error should name the directory: {error}"
+    );
+    assert!(
+        error.contains("--kernel"),
+        "the error should name the override: {error}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_explicit_kernel_still_wins() {
+    let dir = scratch("foundation-override");
+    let source = kernel().expect("fixture kernel");
+
+    let (resolved, _) = resolve_boot(CELL_WITH_FOUNDATION, Some(&source), None, &dir.join("nope"))
+        .expect("an explicit kernel needs no foundation");
+
+    assert_eq!(resolved, source);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_release_needs_no_kernel_argument_when_the_foundation_is_installed() {
+    let Some(source) = kernel() else { return };
+    if !kvm_available() {
+        return;
+    }
+
+    let dir = scratch("release-by-foundation");
+    let keys = KeyFiles::in_dir(dir.join("keys"));
+    keys.generate().expect("keygen");
+
+    let foundations = dir.join("foundations");
+    let installed = foundation_dir(&foundations, "dome/fixture:test");
+    std::fs::create_dir_all(&installed).expect("foundation dir");
+    std::fs::copy(&source, installed.join("vmlinuz")).expect("install kernel");
+
+    let cell = dir.join("example.cell.toml");
+    std::fs::write(&cell, CELL_WITH_FOUNDATION).expect("cell");
+
+    let artifact = dir.join("by-foundation.dome");
+    let mut options = ReleaseOptions::new(&cell, &artifact, keys.clone());
+    options.foundation_root = foundations;
+    options.memory_mib = 64;
+    options.timeout = Duration::from_secs(3);
+
+    let report = release(&options).expect("the cell alone should be enough");
+    // The report names the kernel it resolved, which is how an operator sees which installed
+    // foundation was used without having passed one.
+    assert!(
+        report.contains("dome-fixture-test"),
+        "the report should name the foundation: {report}"
+    );
+    assert!(report.contains("kernel:"), "{report}");
+
+    let described = inspect(&artifact, &keys).expect("inspect");
+    assert!(described.contains("distribution: portable"), "{described}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

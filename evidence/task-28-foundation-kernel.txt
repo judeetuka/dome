@@ -1,0 +1,12 @@
+# the kernel comes from the foundation
+# command: cargo test -p dome-cli --test release -j4
+
+foundation_names_map_to_directories_predictably ... ok
+the_cell_supplies_the_kernel_when_none_is_given ... ok
+an_installed_initramfs_is_picked_up_automatically ... ok
+a_missing_foundation_names_what_is_expected ... ok
+an_explicit_kernel_still_wins ... ok
+a_release_needs_no_kernel_argument_when_the_foundation_is_installed ... ok
+
+# so this now works with no kernel argument:
+#   dome release --cell app.cell.toml --keys keys --output app.dome

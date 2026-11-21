@@ -2463,6 +2463,13 @@ Max Concurrent: 6 (M1 wave)
   > `dome inspect`. **Five end-to-end tests** that boot a real kernel, capture state, write an
   > artifact, reopen it and check what it claims.
   >
+  > **No --kernel by default.** The cell names a foundation, and the foundation supplies the
+  > kernel, the way a Docker image supplies everything it needs. An installed foundation lives
+  > at `$XDG_DATA_HOME/dome/foundations/<name>` (slashes and colons become dashes) holding
+  > `vmlinuz` and optionally `initramfs.cpio.gz`. `--kernel` remains as an override for
+  > development. Note the difference from Docker: a container shares the *host* kernel, while a
+  > chamber runs its own, which is why the kernel belongs to the foundation rather than the host.
+  >
   > The CLI now tells one key story rather than two: `keygen` writes an age identity (to wrap the
   > per-release file key) plus Ed25519 and ML-DSA-65 signing keys, and both `release` and
   > `inspect` draw from that directory. Secret material is chmod 0600 on creation.

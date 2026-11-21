@@ -69,9 +69,9 @@ enum Commands {
         /// Path to the cell blueprint, which is embedded in the artifact
         #[arg(long, value_name = "CELL_TOML")]
         cell: PathBuf,
-        /// Kernel to capture state from
+        /// Kernel override; otherwise the foundation named by the cell supplies it
         #[arg(long, value_name = "BZIMAGE")]
-        kernel: PathBuf,
+        kernel: Option<PathBuf>,
         /// Optional initramfs
         #[arg(long, value_name = "IMAGE")]
         initramfs: Option<PathBuf>,
@@ -224,7 +224,8 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             };
 
             let files = release::KeyFiles::in_dir(&keys);
-            let mut options = release::ReleaseOptions::new(&cell, &kernel, &output, files);
+            let mut options = release::ReleaseOptions::new(&cell, &output, files);
+            options.kernel = kernel;
             options.initramfs = initramfs;
             options.memory_mib = memory_mib;
             options.sealed = seal;

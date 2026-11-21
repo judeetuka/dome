@@ -155,10 +155,12 @@ struct LoadedKeys {
 pub struct ReleaseOptions {
     /// Path to the cell blueprint, included in the artifact.
     pub cell: PathBuf,
-    /// Kernel to boot for the captured state.
-    pub kernel: PathBuf,
-    /// Optional initramfs.
+    /// Kernel override. When absent, the foundation named by the cell supplies it.
+    pub kernel: Option<PathBuf>,
+    /// Optional initramfs override.
     pub initramfs: Option<PathBuf>,
+    /// Where foundations live. Overridable so tests do not depend on the environment.
+    pub foundation_root: PathBuf,
     /// Guest memory, in MiB.
     pub memory_mib: u64,
     /// Where the artifact goes.
@@ -175,16 +177,12 @@ pub struct ReleaseOptions {
 
 impl ReleaseOptions {
     /// Defaults: portable, a minute of boot, and this device declared unprotected.
-    pub fn new(
-        cell: impl Into<PathBuf>,
-        kernel: impl Into<PathBuf>,
-        output: impl Into<PathBuf>,
-        keys: KeyFiles,
-    ) -> Self {
+    pub fn new(cell: impl Into<PathBuf>, output: impl Into<PathBuf>, keys: KeyFiles) -> Self {
         Self {
             cell: cell.into(),
-            kernel: kernel.into(),
+            kernel: None,
             initramfs: None,
+            foundation_root: foundation_root(),
             memory_mib: 64,
             output: output.into(),
             keys,
@@ -195,19 +193,99 @@ impl ReleaseOptions {
     }
 }
 
+/// Where foundations live by default.
+pub fn foundation_root() -> PathBuf {
+    if let Ok(base) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(base).join("dome").join("foundations");
+    }
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_owned());
+    PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("dome")
+        .join("foundations")
+}
+
+/// The directory holding one foundation.
+///
+/// The mapping from name to directory is deliberately simple and documented, because it is the
+/// contract a future build step has to honour: slashes and colons become dashes, so
+/// dome/buildroot:minimal lives in dome-buildroot-minimal.
+pub fn foundation_dir(root: &Path, name: &str) -> PathBuf {
+    let safe: String = name
+        .chars()
+        .map(|character| match character {
+            '/' | ':' => '-',
+            other => other,
+        })
+        .collect();
+
+    root.join(safe)
+}
+
+const FOUNDATION_KERNEL: &str = "vmlinuz";
+const FOUNDATION_INITRAMFS: &str = "initramfs.cpio.gz";
+
+/// Find the kernel and optional initramfs to boot.
+///
+/// An explicit path wins. Otherwise the cell's foundation supplies them, which is how it should
+/// work: the caller names an image, not the pieces inside it.
+pub fn resolve_boot(
+    cell_text: &str,
+    kernel: Option<&Path>,
+    initramfs: Option<&Path>,
+    foundation_root: &Path,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let blueprint = dome_config::Blueprint::from_toml(cell_text)
+        .map_err(|error| format!("the cell blueprint is not valid: {error}"))?;
+    let name = blueprint.cell().foundation().as_str().to_owned();
+    let directory = foundation_dir(foundation_root, &name);
+
+    let kernel_path = match kernel {
+        Some(path) => path.to_path_buf(),
+        None => {
+            let candidate = directory.join(FOUNDATION_KERNEL);
+            if !candidate.is_file() {
+                return Err(format!(
+                    "foundation {name:?} is not installed: expected {} (or pass --kernel to override)",
+                    candidate.display()
+                ));
+            }
+            candidate
+        }
+    };
+
+    let initramfs_path = match initramfs {
+        Some(path) => Some(path.to_path_buf()),
+        None => {
+            let candidate = directory.join(FOUNDATION_INITRAMFS);
+            candidate.is_file().then_some(candidate)
+        }
+    };
+
+    Ok((kernel_path, initramfs_path))
+}
+
 /// Produce a release and report what was written.
 pub fn release(options: &ReleaseOptions) -> Result<String, String> {
     let cell_text = read(&options.cell)?;
     let keys = options.keys.load()?;
+    let (kernel, initramfs) = resolve_boot(
+        &cell_text,
+        options.kernel.as_deref(),
+        options.initramfs.as_deref(),
+        &options.foundation_root,
+    )?;
 
     let engine = LinuxEngine::open().map_err(|error| format!("no usable engine: {error}"))?;
     let size = MemorySize::from_mib(options.memory_mib)
         .map_err(|error| format!("bad memory size: {error}"))?;
 
-    let mut request = LaunchRequest::new(&options.kernel, size);
+    let mut request = LaunchRequest::new(&kernel, size);
     request.timeout = options.timeout;
     request.capture_state = true;
-    if let Some(initramfs) = options.initramfs.as_ref() {
+    if let Some(initramfs) = initramfs.as_ref() {
         request = request.with_initramfs(initramfs);
     }
 
@@ -295,6 +373,10 @@ pub fn release(options: &ReleaseOptions) -> Result<String, String> {
         "  captured on: {}\n",
         options.captured_on.to_record()
     ));
+    report.push_str(&format!("  kernel: {}\n", kernel.display()));
+    if let Some(initramfs) = initramfs.as_ref() {
+        report.push_str(&format!("  initramfs: {}\n", initramfs.display()));
+    }
     if options.sealed {
         report.push_str(
             "  runs on: hardware that keeps guest memory confidential (TDX, SEV-SNP, shielded VM)\n",
