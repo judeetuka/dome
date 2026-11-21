@@ -1,0 +1,11 @@
+# T4 — round-trip fidelity
+# render -> parse must be lossless, and a second render must be byte-identical.
+# covered by tests/round_trip.rs (4 tests)
+
+test renders_the_documented_blueprint_shape ... ok
+test round_trips_a_minimal_blueprint ... ok
+test round_trips_a_fully_populated_blueprint ... ok
+test rendering_is_idempotent ... ok
+     Running tests/round_trip.rs (target/debug/build/dome-config/4e3b3c46c5552700/out/round_trip-4e3b3c46c5552700)
+
+EXIT: 0

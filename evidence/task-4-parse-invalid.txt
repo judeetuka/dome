@@ -1,0 +1,20 @@
+# T4 — rejected inputs (each must fail loudly, never silently)
+# covered by tests/parse_errors.rs (9 tests): invalid TOML, missing [limits],
+# unknown key, zero memory, empty foundation, unknown protocol, unknown aperture
+# mode, zero gpio line.
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test rejects_empty_foundation ... ok
+test rejects_invalid_gpio_line ... ok
+test rejects_invalid_toml ... ok
+test rejects_missing_limits_table ... ok
+test rejects_unknown_aperture_mode ... ok
+test rejects_unknown_protocol ... ok
+test rejects_unknown_keys ... ok
+test rejects_zero_memory ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0

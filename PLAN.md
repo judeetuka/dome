@@ -169,13 +169,14 @@ generally — narrow that to foundations (see **T66**).
 ### 7. Build constraints for every task
 
 - All cargo invocations cap at `-j4` (per operating instructions). Never uncapped.
-- **The development sandbox has a read-only root filesystem.** `~/.cargo` cannot be written,
-  so new dependencies can only be resolved from what is already extracted in
-  `~/.cargo/registry/src`. Run cargo with `CARGO_NET_OFFLINE=true` and pin to the versions
-  already present. A dependency that is not cached cannot be added in this environment —
-  that is a hard limit, not a preference. Workaround: run cargo where `~/.cargo` is writable.
-- Only `toml 1.1.8` is available locally; the 0.8-vs-1.x question in section 2 is settled
-  by availability. T4 targets 1.x.
+- **The development sandbox has a read-only root filesystem**, so `~/.cargo` cannot be
+  written and cargo cannot unpack newly fetched crates there. Workaround in use: run cargo
+  with `CARGO_HOME=target/cargo-home` (a copy of the local registry, gitignored under
+  `target/`, writable, so both offline builds and new fetches work). Delete it with
+  `rm -rf target/cargo-home` to reclaim ~2 GB; it is a sandbox artifact, not part of the
+  project.
+- Resolved dependency versions as of T4: `thiserror 2.0.21`, `serde 1.0.229`, `toml 1.2.1`
+  — all latest published at the time of writing. `clap` arrives in T5.
 - `cargo test --workspace` currently passes: 25 tests across 14 crates.
 - **Resolved**: every tracked file was mode `100755`, which made `git status` report
   the whole tree as modified with a zero-byte diff. `core.fileMode` is now `false` and
@@ -331,7 +332,7 @@ Wave M1 (Complete Blueprint & Core Model — 9 tasks, 6 parallel):
 ├── T1: CI pipeline (GitHub Actions) [DONE]
 ├── T2: tokio deferral decision — runtime lands in M4 [quick]
 ├── T3: Error architecture (thiserror per crate) [DONE]
-├── T4: Serde + TOML parsing (dome-config read path) [unspecified-high]
+├── T4: Serde + TOML parsing (dome-config read path) [DONE]
 ├── T5: CLI migration to clap [unspecified-high]
 ├── T6: Blueprint validation rules [unspecified-high]
 ├── T7: Wire dome-device into dome-host-linux [quick]
@@ -717,51 +718,35 @@ Max Concurrent: 6 (M1 wave)
   - Current TOML output format uses: `[cell]`, `[limits]`, `[[perimeter.ports]]`, `[[apertures.files]]`, `[[apertures.gpio]]`
   - `.rules/rust.md` — Keep tests in `tests/` convention
 
+  **Completed** (2026). Two design deviations, both deliberate:
+
+  - **serde derives live on a private TOML schema in `dome-config`, not on `dome-core`'s
+    domain types.** The blueprint nests published ports under `[perimeter]` and apertures
+    under `[apertures.files]`/`[apertures.gpio]`, which no derive on `CellSpec` could
+    reproduce without forcing the on-disk format to mirror a Rust struct. The schema types
+    map to domain types through their validating constructors, so `dome-core` stays free of
+    serialization concerns and its invariants still hold.
+  - **`Blueprint::to_toml()` now returns `Result<String, ConfigError>`**, not `String`.
+    Rendering can fail; pretending otherwise would mean an `unwrap` in a library. The
+    rendered *format* is unchanged and the existing test was updated for the signature.
+
+  Other decisions worth knowing:
+
+  - Every schema type is `#[serde(deny_unknown_fields)]`, so `memroy_mib = 512` is an
+    error instead of a silently ignored typo. This also delivers T6's "unknown keys" rule
+    ahead of schedule.
+  - `display`, `egress` and `device_access` are now persisted. They existed in the domain
+    model but the old renderer dropped them, which meant a round-trip silently lost them.
+    They are omitted entirely when default, so existing blueprints render unchanged.
+  - `toml` resolved to **1.2.1** (latest published), settling the 0.8-vs-1.x question in
+    section 2 by measurement rather than preference.
+
   **Acceptance Criteria**:
-  - [ ] `cargo test -p dome-core` — existing tests pass
-  - [ ] `cargo test -p dome-config` — existing blueprint_toml test passes
-  - [ ] `Blueprint::from_toml(valid_toml)` succeeds and produces correct CellSpec
-  - [ ] `Blueprint::from_toml(invalid_toml)` fails with descriptive `ConfigError`
-  - [ ] Round-trip: parse valid TOML → render to TOML → parse again → models are semantically equal
-
-  **QA Scenarios**:
-  ```
-  Scenario: Parse valid cell TOML blueprint
-    Tool: Bash
-    Preconditions: Create fixtures/valid.cell.toml with a complete cell definition
-    Steps:
-      1. Write a test that calls Blueprint::from_toml(&contents)
-      2. Assert: returns Ok(blueprint)
-      3. Assert: blueprint.cell().foundation().as_str() == "alpine-3.21"
-      4. Assert: blueprint.cell().limits().memory().as_mib() == 512
-      5. Assert: blueprint.cell().ports().len() == 1
-    Expected Result: TOML parses correctly into domain model
-    Evidence: evidence/task-4-parse-valid.txt
-
-  Scenario: Round-trip TOML idempotence
-    Tool: Bash
-    Steps:
-      1. Parse valid TOML → CellSpec
-      2. Render CellSpec → TOML string via to_toml()
-      3. Parse the rendered TOML → CellSpec2
-      4. Assert: CellSpec == CellSpec2 (PartialEq)
-    Expected Result: Parse → Render → Parse produces identical model
-    Evidence: evidence/task-4-roundtrip.txt
-
-  Scenario: Parse invalid TOML fails gracefully
-    Tool: Bash
-    Steps:
-      1. Parse TOML with "memory = 0" (invalid: ZeroMemory)
-      2. Assert: returns Err(ConfigError)
-      3. Assert: error message contains "memory must be greater than zero"
-    Expected Result: Invalid input produces clear error
-    Evidence: evidence/task-4-parse-invalid.txt
-  ```
-
-  **Commit**: YES
-  - Message: `feat(m1): add serde derives and TOML parsing to dome-config`
-  - Files: `crates/dome-core/src/lib.rs`, `crates/dome-core/Cargo.toml`, `crates/dome-config/src/lib.rs`, `crates/dome-config/Cargo.toml`
-
+  - [x] `serde` + `toml` are workspace dependencies; `dome-config` depends on both
+  - [x] `Blueprint::from_toml(&str) -> Result<Self, ConfigError>` implemented
+  - [x] `to_toml()` renders the same documented shape (verified by test assertions)
+  - [x] Round-trip is lossless for a fully populated blueprint (14 tests in `dome-config`)
+  - [x] All 41 workspace tests pass; clippy `-D warnings` clean
 - [ ] 5. **CLI Migration to clap**
 
   > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.

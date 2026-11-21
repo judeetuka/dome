@@ -20,6 +20,8 @@ default-members = ["crates/dome-cli"]
 
 [workspace.dependencies]
 thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 
 [workspace.package]
 version = "0.1.0"

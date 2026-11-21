@@ -1,0 +1,29 @@
+# T4 — blueprint parse, valid inputs
+# command: cargo test -p dome-config -j4
+
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 1 test
+test renders_blueprint_as_toml ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 9 tests
+test rejects_empty_foundation ... ok
+test accepts_a_minimal_blueprint ... ok
+test rejects_invalid_gpio_line ... ok
+test rejects_invalid_toml ... ok
+test rejects_missing_limits_table ... ok
+test rejects_unknown_aperture_mode ... ok
+test rejects_unknown_protocol ... ok
+test rejects_unknown_keys ... ok
+test rejects_zero_memory ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 4 tests
+test renders_the_documented_blueprint_shape ... ok
+test round_trips_a_minimal_blueprint ... ok
+test round_trips_a_fully_populated_blueprint ... ok
+test rendering_is_idempotent ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0

@@ -1,0 +1,20 @@
+# Valid Dome cell blueprint — the shared fixture for CLI and config tests.
+# Shape is pinned by docs/cli-contract.md; parsed by dome-config.
+[cell]
+foundation = "dome/buildroot:minimal"
+
+[limits]
+memory_mib = 512
+storage_mib = 2048
+cpus = 1
+
+[[perimeter.ports]]
+host_addr = "127.0.0.1"
+host_port = 8080
+guest_port = 80
+protocol = "tcp"
+
+[[apertures.files]]
+host = "/host/project"
+guest = "/work"
+mode = "read-only"
