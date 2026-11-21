@@ -45,6 +45,38 @@ pub enum SupervisorError {
     /// A chamber id would have produced an unsafe directory name.
     #[error("chamber id {0:?} cannot be used as a cgroup name")]
     InvalidChamberId(String),
+
+    /// A published port sits below the privileged boundary.
+    #[error("cannot publish port {port}: ports below 1024 need privilege a chamber supervisor does not have")]
+    PrivilegedPort {
+        /// Port that was requested.
+        port: u16,
+    },
+
+    /// The relay does not carry this transport.
+    #[error("the perimeter relay does not carry {protocol}")]
+    UnsupportedProtocol {
+        /// Transport that was requested.
+        protocol: &'static str,
+    },
+
+    /// The same host port was published twice.
+    #[error("port {port} on {address} is published twice")]
+    DuplicatePort {
+        /// Address the port was published on.
+        address: String,
+        /// Port that collided.
+        port: u16,
+    },
+
+    /// A namespace link did not have the expected shape.
+    #[error("process {pid} has an unreadable network namespace: {value}")]
+    UnexpectedNetns {
+        /// Process that was inspected.
+        pid: u32,
+        /// What the link contained.
+        value: String,
+    },
 }
 
 /// A cgroup holding one chamber's processes.
@@ -210,10 +242,12 @@ fn enable_controllers(root: &Path) -> Result<(), SupervisorError> {
 
 /// Turn a chamber id into a single safe path component.
 ///
+/// Shared with the network module so a name is either safe everywhere or nowhere.
+///
 /// Chamber ids are user input. Interpolating one into a path would let `../..` escape the
 /// delegated subtree, so anything outside a conservative alphabet is refused rather than
 /// silently rewritten.
-fn safe_name(id: &str) -> Result<String, SupervisorError> {
+pub(crate) fn safe_name(id: &str) -> Result<String, SupervisorError> {
     let safe = !id.is_empty()
         && id.len() <= 64
         && id

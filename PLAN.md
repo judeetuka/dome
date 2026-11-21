@@ -2079,22 +2079,30 @@ Max Concurrent: 6 (M1 wave)
   **Parallelization**: Can Run In Parallel YES with T22 | Blocks: T24 | Blocked By: M3 complete
   **References**: `netns-rs` docs — `NetNs::new()`; `rtnetlink` docs — link creation; `crates/dome-net/src/lib.rs` — `PerimeterPolicy`
 
-  > **STATUS: PARTIAL — the spec as written is impossible under zero privilege.** Measured
-  > on this host as uid 1000: `ip netns add` fails (`/var/run/netns` permission denied) and
-  > `ip link add ... type veth` in the host namespace fails with EPERM. So "create veth
-  > `host-{id}` ↔ `chamber-{id}` in the host namespace and apply nftables" cannot happen.
+  > **STATUS: PARTIAL — most of it is done; the relay is the remainder.**
   >
-  > What **is** possible, and now done: inside its own user+net namespace the chamber process
-  > holds CAP_NET_ADMIN, so it can raise loopback (verified: `lo` comes up and the kernel
-  > assigns 127.0.0.1/8) and create a veth pair within that namespace.
+  > **Measured first.** As uid 1000 on this host: `ip netns add` fails (`/var/run/netns`
+  > permission denied), `ip link add ... type veth` in the host namespace fails with EPERM,
+  > and `setns` into another user's namespace is not permitted. So the plan's
+  > "veth `host-{id}` ↔ `chamber-{id}` in the host namespace plus nftables" cannot happen.
+  > **The chamber owns its namespace; the supervisor cannot construct it from outside.**
   >
-  > Consequence: **the chamber owns its network namespace; the supervisor cannot build it from
-  > outside.** Host connectivity and port publishing therefore need a userspace forwarder
-  > living in the chamber's own network namespace — split out as **T69**.
+  > Done and tested:
+  > - `sandbox::bring_up_loopback` — called by `apply_engine_cage` before Landlock and
+  >   seccomp. Without it a namespaced chamber cannot reach even 127.0.0.1, which presents as
+  >   an application bug rather than a missing interface. Verified from the kernel's flags.
+  > - `ChamberNetwork::plan` — validates the perimeter before anything starts: a host port
+  >   below 1024 is refused with the reason (no CAP_NET_BIND_SERVICE), a duplicate host port
+  >   is refused, UDP is refused rather than silently dropped because the relay carries TCP,
+  >   and a hostile chamber id cannot shape the namespace name. Eight tests.
+  > - `ChamberNetwork::netns_inode` — identifies a process's network namespace by inode,
+  >   which is how "the chamber really has its own" becomes checkable. A test compares against
+  >   a child that unshared, and only passes when the inodes differ.
   >
-  > Done here: `sandbox::bring_up_loopback`, called by `apply_engine_cage` before Landlock and
-  > seccomp. Without it a namespaced chamber cannot reach even 127.0.0.1, which looks like an
-  > application bug rather than a missing interface. One test asserts the interface flag.
+  > **Remaining (the whole of what is left):** the byte relay. A supervisor listener on the
+  > host port must hand connections to a forwarder inside the chamber's namespace over a
+  > socketpair created before `unshare`, since nothing may `setns` in. That finishes
+  > `publish_port` and therefore T23.
 
   **Acceptance Criteria**:
   - [ ] Network namespace created with correct name
@@ -3735,32 +3743,6 @@ Max Concurrent: 6 (M1 wave)
   - [ ] A suite-1 reader refuses a suite-2 file with `UnsupportedSuite`
   - [ ] Dual signatures: a file with one forged signature is rejected
   - [ ] No `SIGNATURE_LEN` constant is used to locate the footer
-
----
-
-- [ ] 69. **Userspace Perimeter (port publishing without privilege)**
-
-  > Split out of T23 after measuring the constraint: the host namespace is out of reach for an
-  > unprivileged process, so a chamber's connectivity has to be built **inside the chamber's
-  > own network namespace** and bridged to the host in user space.
-
-  **What to do**:
-  - A TAP or veth end inside the chamber netns, owned by the chamber process.
-  - A userspace TCP/IP forwarder in the supervisor (slirp-style): terminate host-facing
-    connections, open matching connections inside the chamber, copy bytes both ways.
-  - Egress policy from `PerimeterPolicy` enforced at the forwarder, not with nftables, because
-    nftables needs CAP_NET_ADMIN in the host namespace.
-  - Default deny. A published port is an explicit, recorded aperture.
-
-  **Must NOT do**:
-  - Do not attempt host netns or host veth creation: measured EPERM.
-  - Do not enable NAT or forwarding on the host interface.
-
-  **Acceptance Criteria**:
-  - [ ] A chamber reaches a published host port through the forwarder
-  - [ ] Unpublished ports are refused, with a test that proves the refusal
-  - [ ] Egress policy denies by default
-  - [ ] No host namespace mutation is attempted anywhere in the path
 
 ---
 

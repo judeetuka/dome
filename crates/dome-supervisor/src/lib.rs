@@ -1,4 +1,5 @@
 pub mod cgroup;
+pub mod network;
 
 use dome_core::ChamberId;
 
