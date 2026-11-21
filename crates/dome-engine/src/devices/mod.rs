@@ -29,6 +29,27 @@ pub trait Device {
 
     /// Guest write to the window.
     fn mmio_write(&mut self, offset: u64, data: &[u8]);
+
+    /// The port range this device answers, if it is a legacy port device.
+    ///
+    /// Only the UART needs this. Modern macOS and Windows engines have no port space at all,
+    /// which is why it is optional rather than required.
+    fn io_range(&self) -> Option<(u16, u16)> {
+        None
+    }
+
+    /// Guest read from a port.
+    fn io_in(&mut self, _port: u16, data: &mut [u8]) {
+        data.fill(0);
+    }
+
+    /// Guest write to a port.
+    fn io_out(&mut self, _port: u16, _data: &[u8]) {}
+
+    /// Everything the guest has written to this device, if it is a console.
+    fn console(&self) -> Option<&[u8]> {
+        None
+    }
 }
 
 /// The devices attached to one chamber.
@@ -79,6 +100,45 @@ impl DeviceSet {
         true
     }
 
+    /// Everything the guest has written to the console, whichever path it used.
+    pub fn console(&self) -> &[u8] {
+        self.devices
+            .iter()
+            .find_map(|device| device.console())
+            .unwrap_or(&[])
+    }
+
+    /// Route a guest write to a port, returning whether any device claimed it.
+    pub fn io_write(&mut self, port: u16, data: &[u8]) -> bool {
+        for device in self.devices.iter_mut() {
+            if let Some((base, length)) = device.io_range()
+                && port >= base
+                && port < base.saturating_add(length)
+            {
+                device.io_out(port, data);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Route a guest read from a port, returning whether any device claimed it.
+    pub fn io_read(&mut self, port: u16, data: &mut [u8]) -> bool {
+        for device in self.devices.iter_mut() {
+            if let Some((base, length)) = device.io_range()
+                && port >= base
+                && port < base.saturating_add(length)
+            {
+                device.io_in(port, data);
+                return true;
+            }
+        }
+
+        data.fill(0);
+        false
+    }
+
     /// Route a guest read, returning whether any device claimed the address.
     pub fn mmio_read(&mut self, address: u64, data: &mut [u8]) -> bool {
         let Some((device, offset)) = self.route(address) else {
@@ -127,4 +187,59 @@ pub fn read_descriptor(
         flags: u16::from_le_bytes(bytes[12..14].try_into().unwrap_or([0; 2])),
         next: u16::from_le_bytes(bytes[14..16].try_into().unwrap_or([0; 2])),
     })
+}
+
+/// The devices a running chamber exposes, behind the engine's IO trait.
+///
+/// One object serves both paths: a legacy port write from a BIOS-era guest and a memory-mapped
+/// write from a modern one reach the same device, so the two cannot disagree about state.
+pub struct ChamberIo {
+    devices: DeviceSet,
+}
+
+impl ChamberIo {
+    /// A chamber with a console and nothing else, which is the current device set.
+    pub fn with_console() -> Self {
+        let mut devices = DeviceSet::new();
+        devices.add(Box::new(uart16550::Uart16550::new()));
+        Self { devices }
+    }
+
+    /// A chamber with devices the caller chose.
+    pub fn from_devices(devices: DeviceSet) -> Self {
+        Self { devices }
+    }
+
+    /// The device set, for attaching more.
+    pub fn devices_mut(&mut self) -> &mut DeviceSet {
+        &mut self.devices
+    }
+
+    /// Everything the guest has written to the console.
+    pub fn console(&self) -> &[u8] {
+        self.devices.console()
+    }
+
+    /// The console as text, lossily.
+    pub fn console_text(&self) -> String {
+        String::from_utf8_lossy(self.console()).into_owned()
+    }
+}
+
+impl crate::vcpu::VcpuIo for ChamberIo {
+    fn io_in(&mut self, port: u16, data: &mut [u8]) {
+        self.devices.io_read(port, data);
+    }
+
+    fn io_out(&mut self, port: u16, data: &[u8]) {
+        self.devices.io_write(port, data);
+    }
+
+    fn mmio_read(&mut self, address: u64, data: &mut [u8]) {
+        self.devices.mmio_read(address, data);
+    }
+
+    fn mmio_write(&mut self, address: u64, data: &[u8]) {
+        self.devices.mmio_write(address, data);
+    }
 }

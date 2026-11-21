@@ -19,6 +19,7 @@ dome-core = { path = "../dome-core" }
 dome-crypto = { path = "../dome-crypto" }
 dome-image = { path = "../dome-image" }
 dome-engine = { path = "../dome-engine" }
+dome-supervisor = { path = "../dome-supervisor" }
 age = { version = "0.11", default-features = false }
 dome-obfuscation = { path = "../dome-obfuscation" }
 

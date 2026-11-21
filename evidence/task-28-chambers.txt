@@ -1,0 +1,30 @@
+# the chamber run/stop registry
+# command: cargo test -p dome-supervisor --test registry -j4
+#          cargo test -p dome-cli --test chambers -j4
+
+registry, against real processes:
+  a_recorded_chamber_is_reported_running ... ok
+  a_dead_process_is_not_reported_running ... ok
+  stopping_an_idle_chamber_says_it_was_already_stopped ... ok
+  stopping_a_cooperative_process_needs_no_force ... ok
+  a_process_that_ignores_the_signal_is_forced ... ok
+  stopping_an_unknown_chamber_is_an_error ... ok
+
+chamber lifecycle:
+  an_empty_registry_says_so ... ok
+  a_chamber_is_started_listed_and_stopped ... ok
+  starting_a_chamber_twice_is_refused_while_it_runs ... ok
+  starting_a_chamber_without_a_foundation_fails_before_spawning ... ok
+  stopping_an_unknown_chamber_is_an_error ... ok
+  the_chamber_body_boots_a_real_kernel ... ok
+
+# ---
+# dome run app.cell.toml      -> started app (pid N), log path
+# dome ps                     -> CHAMBER PID STATE CELL
+# dome stop app               -> stopped | was not running | was killed
+#
+# bugs the tests caught:
+#   kill(pid, 0) succeeds for a zombie, so a cleanly exited chamber looked alive.
+#     liveness now reads /proc/<pid>/stat state; kill(0) is only a fallback.
+#   a chamber body that stopped without a start record left no record, so ps
+#     could not see it. record_stopped now always writes one.

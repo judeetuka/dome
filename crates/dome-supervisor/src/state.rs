@@ -31,6 +31,12 @@ pub struct PersistedChamber {
     pub state: RestartState,
     /// Whether it was running when the record was last written.
     pub was_running: bool,
+    /// Process id of the engine, once one has been started.
+    pub pid: Option<u32>,
+    /// The blueprint it was created from, for a supervisor that has to restart it.
+    pub cell: Option<String>,
+    /// When it started, in seconds since the Unix epoch.
+    pub started_unix: u64,
 }
 
 /// A record that could not be read, and why.
@@ -91,12 +97,15 @@ impl ChamberStore {
         let temporary = path.with_extension("chamber.tmp");
 
         let body = format!(
-            "id={}\npolicy={}\nattempts={}\nreason={}\nrunning={}\n",
+            "id={}\npolicy={}\nattempts={}\nreason={}\nrunning={}\npid={}\ncell={}\nstarted={}\n",
             record.id.as_str(),
             record.policy.to_record(),
             record.state.attempts,
             record.state.reason.as_str(),
             record.was_running,
+            record.pid.map(|pid| pid.to_string()).unwrap_or_default(),
+            record.cell.as_deref().unwrap_or_default(),
+            record.started_unix,
         );
 
         fs::write(&temporary, body).map_err(|error| SupervisorError::Io {
@@ -227,6 +236,9 @@ fn parse(text: &str) -> Result<PersistedChamber, String> {
     let mut attempts = 0u32;
     let mut reason = None;
     let mut was_running = false;
+    let mut pid = None;
+    let mut cell = None;
+    let mut started_unix = 0u64;
 
     for line in text.lines() {
         let Some((key, value)) = line.split_once('=') else {
@@ -248,6 +260,10 @@ fn parse(text: &str) -> Result<PersistedChamber, String> {
                 );
             }
             "running" => was_running = value.trim() == "true",
+            // Older records do not carry these, so a missing value is not an error.
+            "pid" => pid = value.trim().parse().ok(),
+            "cell" if !value.trim().is_empty() => cell = Some(value.trim().to_owned()),
+            "started" => started_unix = value.trim().parse().unwrap_or(0),
             _ => {}
         }
     }
@@ -263,5 +279,8 @@ fn parse(text: &str) -> Result<PersistedChamber, String> {
             reason: reason.unwrap_or(ExitReason::Clean),
         },
         was_running,
+        pid,
+        cell,
+        started_unix,
     })
 }

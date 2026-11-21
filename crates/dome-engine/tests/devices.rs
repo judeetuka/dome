@@ -10,8 +10,9 @@ use dome_engine::devices::uart16550::{SERIAL_MMIO_BASE, Uart16550};
 use dome_engine::devices::virtio_mmio::{
     Descriptor, MAGIC, QUEUE_NUM_MAX, VERSION, VirtioBackend, VirtioMmio, reg, status,
 };
-use dome_engine::devices::{Device, DeviceSet, VIRTIO_MMIO_BASE, read_descriptor};
+use dome_engine::devices::{ChamberIo, Device, DeviceSet, VIRTIO_MMIO_BASE, read_descriptor};
 use dome_engine::memory::GuestMemory;
+use dome_engine::vcpu::VcpuIo;
 
 struct FakeBackend {
     notifies: Vec<u16>,
@@ -336,4 +337,52 @@ fn reading_a_descriptor_past_the_end_of_guest_memory_is_an_error() {
         ),
         "{result:?}"
     );
+}
+
+// --- one io object for the run loop ---
+
+#[test]
+fn the_chamber_io_serves_both_the_port_and_mmio_paths() {
+    let mut io = ChamberIo::with_console();
+
+    // A BIOS-era guest writes to the port.
+    io.io_out(0x3F8, b"A");
+
+    // A modern guest writes to the device window.
+    io.mmio_write(SERIAL_MMIO_BASE, b"B");
+
+    // Both reach the same console, in the order they happened.
+    assert_eq!(io.console_text(), "AB");
+}
+
+#[test]
+fn the_chamber_io_ignores_a_port_no_device_owns() {
+    let mut io = ChamberIo::with_console();
+
+    io.io_out(0x9999, b"x");
+    assert_eq!(io.console_text(), "", "nothing should have been captured");
+
+    // A read from an unowned port is zeroed rather than left as garbage.
+    let mut data = [0xFFu8; 2];
+    io.io_in(0x9999, &mut data);
+    assert_eq!(data, [0, 0]);
+}
+
+#[test]
+fn the_chamber_io_answers_status_reads_over_the_port_path() {
+    let mut io = ChamberIo::with_console();
+    let mut line_status = [0u8; 1];
+
+    io.io_in(0x3FD, &mut line_status);
+
+    assert_eq!(line_status[0] & 0x60, 0x60, "transmitter must report ready");
+}
+
+#[test]
+fn the_chamber_io_ignores_memory_no_device_owns() {
+    let mut io = ChamberIo::with_console();
+
+    // Writing into unmapped space must be harmless rather than a panic.
+    io.mmio_write(0xdead_beef, b"x");
+    assert_eq!(io.console_text(), "");
 }

@@ -5,6 +5,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dome_config::Blueprint;
 use dome_host_linux::{HostReport, ProbeRoot};
 
+pub mod chambers;
 pub mod release;
 
 /// Dome command-line entry point.
@@ -43,25 +44,71 @@ enum Commands {
         format: OutputFormat,
     },
 
-    /// Launch a chamber from a blueprint (arrives in M4)
+    /// Launch a chamber from a blueprint and return
     Run {
         #[arg(value_name = "CELL_TOML")]
         cell: PathBuf,
-        /// Chamber id; defaults to the blueprint's foundation-adjacent name
+        /// Chamber name; defaults to the blueprint's file stem
         #[arg(long, value_name = "ID")]
         name: Option<String>,
-        /// Display backend
-        #[arg(long, value_name = "MODE")]
-        display: Option<String>,
-        /// VNC port; only meaningful with --display vnc
-        #[arg(long, value_name = "PORT")]
-        vnc_port: Option<u16>,
+        /// Kernel override; the foundation supplies one otherwise
+        #[arg(long, value_name = "BZIMAGE")]
+        kernel: Option<PathBuf>,
+        /// Initramfs override
+        #[arg(long, value_name = "IMAGE")]
+        initramfs: Option<PathBuf>,
+        /// Guest memory in MiB
+        #[arg(long, value_name = "MIB", default_value_t = 64)]
+        memory_mib: u64,
+        /// Wall-clock limit for the chamber, in seconds
+        #[arg(long, value_name = "SECONDS", default_value_t = 3600)]
+        timeout: u64,
+        /// State directory; defaults to the user's state directory
+        #[arg(long, value_name = "DIR")]
+        state: Option<PathBuf>,
+        /// Foundation search root
+        #[arg(long, value_name = "DIR")]
+        foundations: Option<PathBuf>,
     },
 
-    /// Stop a running chamber (arrives in M4)
+    /// Stop a running chamber
     Stop {
         #[arg(value_name = "CHAMBER_ID")]
         chamber_id: String,
+        /// Seconds to wait after asking before insisting
+        #[arg(long, value_name = "SECONDS", default_value_t = 10)]
+        grace: u64,
+        /// State directory
+        #[arg(long, value_name = "DIR")]
+        state: Option<PathBuf>,
+    },
+
+    /// List chambers
+    Ps {
+        /// State directory
+        #[arg(long, value_name = "DIR")]
+        state: Option<PathBuf>,
+    },
+
+    /// The chamber process itself; started by dome run, not by hand
+    #[command(hide = true, name = "__boot")]
+    Boot {
+        #[arg(long, value_name = "CELL_TOML")]
+        cell: PathBuf,
+        #[arg(long, value_name = "ID")]
+        name: Option<String>,
+        #[arg(long, value_name = "BZIMAGE")]
+        kernel: Option<PathBuf>,
+        #[arg(long, value_name = "IMAGE")]
+        initramfs: Option<PathBuf>,
+        #[arg(long, value_name = "MIB", default_value_t = 64)]
+        memory_mib: u64,
+        #[arg(long, value_name = "SECONDS", default_value_t = 3600)]
+        timeout: u64,
+        #[arg(long, value_name = "DIR")]
+        state: Option<PathBuf>,
+        #[arg(long, value_name = "DIR")]
+        foundations: Option<PathBuf>,
     },
 
     /// Build a release artifact from a cell blueprint
@@ -182,6 +229,22 @@ pub fn run(args: Vec<String>) -> Result<String, CliError> {
     }
 }
 
+/// Where chamber records and logs live.
+fn state_root(explicit: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = explicit {
+        return path;
+    }
+
+    if let Ok(base) = env::var("XDG_STATE_HOME") {
+        return PathBuf::from(base).join("dome");
+    }
+
+    PathBuf::from(env::var("HOME").unwrap_or_else(|_| ".".to_owned()))
+        .join(".local")
+        .join("state")
+        .join("dome")
+}
+
 fn help_text() -> String {
     let mut command = Cli::command();
     let mut buffer = Vec::new();
@@ -205,8 +268,64 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             Ok(String::from_utf8_lossy(&buffer).into_owned())
         }
 
-        Commands::Run { .. } => Err(CliError::NotYetImplemented("run")),
-        Commands::Stop { .. } => Err(CliError::NotYetImplemented("stop")),
+        Commands::Run {
+            cell,
+            name,
+            kernel,
+            initramfs,
+            memory_mib,
+            timeout,
+            state,
+            foundations,
+        } => {
+            let mut options = chambers::RunOptions::new(&cell, state_root(state));
+            options.name = name;
+            options.kernel = kernel;
+            options.initramfs = initramfs;
+            options.memory_mib = memory_mib;
+            options.timeout = std::time::Duration::from_secs(timeout);
+            if let Some(root) = foundations {
+                options.foundation_root = root;
+            }
+
+            chambers::start(&options).map_err(CliError::Failed)
+        }
+
+        Commands::Stop {
+            chamber_id,
+            grace,
+            state,
+        } => chambers::stop(
+            &chamber_id,
+            &state_root(state),
+            std::time::Duration::from_secs(grace),
+        )
+        .map_err(CliError::Failed),
+
+        Commands::Ps { state } => chambers::list(&state_root(state)).map_err(CliError::Failed),
+
+        Commands::Boot {
+            cell,
+            name,
+            kernel,
+            initramfs,
+            memory_mib,
+            timeout,
+            state,
+            foundations,
+        } => {
+            let mut options = chambers::RunOptions::new(&cell, state_root(state));
+            options.name = name;
+            options.kernel = kernel;
+            options.initramfs = initramfs;
+            options.memory_mib = memory_mib;
+            options.timeout = std::time::Duration::from_secs(timeout);
+            if let Some(root) = foundations {
+                options.foundation_root = root;
+            }
+
+            chambers::boot(&options).map_err(CliError::Failed)
+        }
         Commands::Release {
             cell,
             kernel,
@@ -387,6 +506,9 @@ impl CliError {
     pub fn exit_code(&self) -> u8 {
         match self {
             Self::InvalidBlueprint { .. } | Self::UnreadableFile { .. } => 3,
+            // A chamber or release that could not be produced is an engine or environment
+            // failure, which the CLI contract keeps distinct from misusing the command line.
+            Self::Failed(_) => 5,
             _ => 2,
         }
     }

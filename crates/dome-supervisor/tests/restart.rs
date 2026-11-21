@@ -26,6 +26,9 @@ fn record(
             reason,
         },
         was_running,
+        pid: None,
+        cell: None,
+        started_unix: 0,
     }
 }
 

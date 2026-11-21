@@ -14,11 +14,12 @@ use dome_core::MemorySize;
 
 use crate::EngineError;
 use crate::boot::{INITRD_ADDRESS, PlacedInitrd, write_zero_page};
+use crate::devices::ChamberIo;
 use crate::linux::LinuxEngine;
 use crate::loader::{MIN_KERNEL_ADDRESS, load_bzimage};
 use crate::memory::GuestMemory;
 use crate::sandbox;
-use crate::vcpu::{SerialDevice, Vcpu, VcpuEntry, VcpuSnapshot, VcpuStop, map_guest_memory};
+use crate::vcpu::{Vcpu, VcpuEntry, VcpuSnapshot, VcpuStop, map_guest_memory};
 
 /// Upper bound on device exits before a launch is abandoned.
 ///
@@ -200,13 +201,15 @@ impl LinuxEngine {
         let finished = Arc::new(AtomicBool::new(false));
         let watchdog = start_watchdog(current_thread_id(), Arc::clone(&finished), request.timeout);
 
-        let mut serial = SerialDevice::default();
+        // One object for both paths: a legacy port write and a memory-mapped write reach the
+        // same devices, so the console cannot disagree with itself.
+        let mut io = ChamberIo::with_console();
         let mut exits = 0u64;
         let mut stopped = false;
         let mut timed_out = false;
 
         while exits < MAX_EXITS {
-            match vcpu.run_once(&mut serial) {
+            match vcpu.run_once(&mut io) {
                 Ok(VcpuStop::Halted | VcpuStop::Shutdown) => {
                     stopped = true;
                     break;
@@ -241,7 +244,7 @@ impl LinuxEngine {
         };
 
         Ok(BootOutcome {
-            console: serial.text(),
+            console: io.console_text(),
             exits,
             stopped,
             timed_out,

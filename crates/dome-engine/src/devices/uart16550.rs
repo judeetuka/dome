@@ -94,4 +94,27 @@ impl Device for Uart16550 {
             self.write_mmio(offset + index as u64, *byte);
         }
     }
+
+    fn console(&self) -> Option<&[u8]> {
+        Some(&self.output)
+    }
+
+    fn io_range(&self) -> Option<(u16, u16)> {
+        Some((SERIAL_PORT, SERIAL_PORT_LENGTH))
+    }
+
+    fn io_in(&mut self, port: u16, data: &mut [u8]) {
+        for (index, byte) in data.iter_mut().enumerate() {
+            *byte = self.read_port(port.wrapping_sub(SERIAL_PORT).wrapping_add(index as u16));
+        }
+    }
+
+    fn io_out(&mut self, port: u16, data: &[u8]) {
+        for (index, byte) in data.iter().enumerate() {
+            self.write_port(
+                port.wrapping_sub(SERIAL_PORT).wrapping_add(index as u16),
+                *byte,
+            );
+        }
+    }
 }

@@ -35,7 +35,7 @@ verification is reproducible from a clean checkout.
 | **M2** format + crypto | T10–T14, T68 | **DONE** (6/6) — crypto, header, writer, reader, integration, PQ suite 2 |
 | **M3** engine | T15–T21 | **DONE** (7/7) — real kernel boots in-engine, inside the cage |
 | M3 sign-off gate | T67 | **partial** — CPUID policy, DMA refusal, cage done; device-set pin, I/O rate limits, fuzz owed |
-| M4 chambers, cgroups, netns | T22–T28, T63–T64, T69 | **in progress** — T22–T25 and T69 done; seal, export, integration and substrate remain |
+| M4 chambers, cgroups, netns | T22–T28, T63–T64, T69 | **done except T64 and the export/import verbs** — chambers run, stop and persist |
 | M5 OS builder | T29–T32, T65 | not started |
 | M6 sentinel + display | T33–T37 | not started |
 | M7 apertures | T38–T42 | not started |
@@ -2440,7 +2440,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 28. **M4 Integration Tests (Enforcement, Conflict, Cleanup)**
+- [x] 28. **M4 Integration Tests (Enforcement, Conflict, Cleanup)**
 
   **What to do**:
   - Create comprehensive lifecycle tests:
@@ -2477,8 +2477,26 @@ Max Concurrent: 6 (M1 wave)
   > **Default is portable**, which is the decision recorded in ADR 0004: sealing narrows where an
   > artifact runs, so it must be asked for explicitly with `--seal`.
   >
-  > Owed: the `run`/`stop` chamber lifecycle, and `export`/`import` CLI commands. The export
-  > format exists and is tested; it needs a CLI verb, which belongs with the chamber registry.
+  > **The chamber lifecycle is done.** `dome run` spawns the chamber as a real process, records
+  > it, and returns; `dome stop` asks, waits, then insists; `dome ps` reports the truth. A hidden
+  > `__boot` command is the chamber body itself.
+  >
+  > The registry lives in `crates/dome-supervisor/src/registry.rs`, and its tests drive **real
+  > processes**: a live child is reported running, a killed one is not, a cooperative one stops
+  > without force, a SIGTERM-ignoring one is forced, and an unknown chamber is an error.
+  >
+  > Two bugs the tests caught, both worth recording:
+  >
+  > 1. `kill(pid, 0)` reports success for a **zombie**, so a chamber that exited cleanly looked
+  >    alive until its parent reaped it. Liveness now reads the process state from `/proc`;
+  >    the existence check is only a fallback.
+  > 2. A chamber body that stopped without a prior start record left **no record at all**, so it
+  >    was invisible to `ps`. `record_stopped` now always writes one.
+  >
+  > Owed: `export`/`import` CLI verbs. The package format exists and is tested; it wants a verb
+  > of its own.
+
+
 
   **Acceptance Criteria**:
   - [ ] All M4 tests pass
@@ -3689,7 +3707,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 63. **Virtio Substrate (UART + initramfs boot path)**
+- [x] 63. **Virtio Substrate (UART + initramfs boot path)**
 
   **What to do**:
   - Pin the minimum device set every engine must implement: 16550 UART on MMIO, a
@@ -3710,6 +3728,20 @@ Max Concurrent: 6 (M1 wave)
 
   **Parallelization**: Can Run In Parallel: NO — needs T59. **Blocks**: T19, T21, T36b,
   T38, T39. **Blocked By**: T59.
+
+  > **Done.** `crates/dome-engine/src/devices/` with `uart16550.rs`,
+  > `virtio_mmio.rs` and the `DeviceSet`/`Device`/`VirtioBackend` traits;
+  > `docs/device-set.md`; **twenty tests, none needing a hypervisor**.
+  >
+  > The run loop now routes through `ChamberIo`, so a legacy port write and a memory-mapped
+  > write reach the same device and the console cannot disagree with itself. The port-IO serial
+  > device delegates to the UART rather than duplicating it.
+  >
+  > Measured image weight is recorded in the doc rather than asserted: a bootable base is
+  > ~12 MB against 420 MB for `postgres:16-alpine`, and the doc is explicit that a thin
+  > container image will always be smaller on disk because it borrows the host kernel. The win
+  > claimed is system footprint — no daemon, one foundation via reflink, shared read-only pages
+  > — not bytes per image.
 
   **Acceptance Criteria**:
   - [ ] UART and initramfs writer pass unit tests with no hypervisor

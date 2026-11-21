@@ -74,13 +74,9 @@ fn unreadable_blueprint_is_a_validation_failure() {
 
 #[test]
 fn unimplemented_commands_exit_2_and_say_so() {
-    // seal and export are no longer stubs: release and inspect replaced them, so only the
-    // commands that genuinely do not exist yet are listed here.
-    let cases: [&[&str]; 3] = [
-        &["run", VALID],
-        &["stop", "chamber-1"],
-        &["build", "--list"],
-    ];
+    // run, stop and ps are implemented now; seal and export were replaced by release and
+    // inspect. Only the commands that genuinely do not exist yet are listed here.
+    let cases: [&[&str]; 2] = [&["build", "--list"], &["foundation", "info", "base.dome"]];
 
     for case in cases {
         let error = run(argv(case)).unwrap_err();
@@ -91,6 +87,32 @@ fn unimplemented_commands_exit_2_and_say_so() {
         assert_eq!(error.exit_code(), 2);
         assert!(error.to_string().contains("not implemented"));
     }
+}
+
+#[test]
+fn run_without_an_installed_foundation_explains_itself() {
+    // The chamber commands are real now, so a missing foundation is an environment failure
+    // rather than "not implemented": exit code 5, and a message naming the path it wanted.
+    let error = run(argv(&[
+        "run",
+        VALID,
+        "--foundations",
+        "/nonexistent-dome-foundations",
+    ]))
+    .unwrap_err();
+
+    assert!(matches!(error, CliError::Failed(_)), "{error:?}");
+    assert_eq!(error.exit_code(), 5);
+    assert!(error.to_string().contains("is not installed"), "{error}");
+}
+
+#[test]
+fn ps_on_an_empty_state_directory_says_so() {
+    let output = run(argv(&["ps", "--state", "/tmp/dome-ps-empty"])).expect("ps");
+    assert!(
+        output.contains("no chambers") || output.contains("CHAMBER"),
+        "{output}"
+    );
 }
 
 #[test]

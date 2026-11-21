@@ -3,6 +3,7 @@ pub mod chamber;
 pub mod frame;
 pub mod lifecycle;
 pub mod network;
+pub mod registry;
 pub mod relay;
 pub mod restart;
 pub mod state;
