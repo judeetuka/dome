@@ -12,6 +12,9 @@ dome-core = { path = "../dome-core" }
 # KVM crates are Linux-only; other platforms get their own engine back end.
 [target.'cfg(target_os = "linux")'.dependencies]
 kvm-bindings = "0.14"
+libc = "0.2"
+seccompiler = "0.5"
+landlock = "0.4"
 kvm-ioctls = "0.25"
 linux-loader = { version = "0.14", features = ["bzimage", "elf"] }
 vm-memory = { version = "0.18", features = ["backend-mmap"] }

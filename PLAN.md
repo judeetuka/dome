@@ -375,7 +375,7 @@ Wave M3 (Linux Native Engine — 7 tasks, 4 parallel):
 ├── T17: Guest memory manager [DONE]
 ├── T18: Kernel loader (bzImage) [DONE]
 ├── T19: VCPU lifecycle (create, init, run loop skeleton) [deep]
-├── T20: Engine process sandbox (seccomp + Landlock) [deep]
+├── T20: Engine process sandbox [PARTIAL: seccomp+ns+privs done, Landlock owed]
 └── T21: M3 integration tests (capability, failure, minimal boot) [unspecified-high]
 
 Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
@@ -1743,36 +1743,45 @@ Max Concurrent: 6 (M1 wave)
   - `landlock` crate docs — `Ruleset`, `PathBeneath`, `CompatLevel`
   - `.rules/security.md:9` — "treat the engine process as an attack surface that needs its own sandbox"
 
+  **Status: PARTIAL** (2026). Implementation is `crates/dome-engine/src/sandbox.rs`,
+  with `crates/dome-engine/src/bin/cage_probe.rs` as the test child. **Six tests pass.**
+
+  Shipped and verified: `PR_SET_NO_NEW_PRIVS`, `PR_SET_DUMPABLE = 0`, `RLIMIT_CORE = 0`,
+  namespace isolation (user+mount+pid+net in one `unshare`), and a seccomp allowlist whose
+  denial path is proven (a `reboot(2)` call is killed by SIGSYS) while ordinary work still
+  succeeds.
+
+  Three measured findings, each of which changed the design:
+
+  1. **`unshare(CLONE_NEWUSER)` returns EINVAL in a multithreaded process.** Measured with
+     `cage_probe`: single-threaded reports success, a libtest process fails. The engine's
+     launch order is therefore fixed: establish namespaces first, spawn threads second.
+     This constrains T19 and T22 and cannot be worked around.
+  2. **`NoNewPrivs` and seccomp are per-thread.** `/proc/self/status` reports the thread
+     group leader, so a filter installed on a worker thread is invisible there. Tests read
+     `/proc/thread-self/status`; the engine must apply its filter on the thread that will
+     keep running, before it is duplicated.
+  3. **A guessed allowlist demonstrably kills the process.** The first hand-written list
+     omitted `openat`, and the test that checks "the filter still permits normal work"
+     caught it immediately — which is exactly why the plan demands a measured list.
+
+  Allowlist provenance: Firecracker publishes its reviewed filters as JSON. Its `vmm` thread
+  allows syscalls 0..=97 and its `vcpu` thread 0..=49. Dome uses that range as the baseline
+  and lists every higher-numbered call it needs (openat, newfstatat, futex, epoll,
+  clone3, ...) explicitly. That is cited, not guessed — but it is still **not** Dome's own
+  trace, so the filter stays opt-in at launch until T56-style tracing replaces the block.
+
+  Not yet done: **Landlock** (the crate exposes its builders as trait methods; needs
+  `RulesetAttr`/`RulesetCreatedAttr` imports) and the trace-derived allowlist above.
+
   **Acceptance Criteria**:
-  - [ ] Seccomp filter compiles and can be applied
-  - [ ] Landlock ruleset can be created and applied
-  - [ ] Sandbox application is called during `launch()`
-  - [ ] EngineError returned if sandbox setup fails
-  - [ ] Tests verify sandbox functions compile and don't crash
-
-  **QA Scenarios**:
-  ```
-  Scenario: Seccomp filter compiles
-    Tool: Bash
-    Steps:
-      1. cargo test -p dome-engine --test sandbox 2>&1
-      2. Assert: seccomp filter compilation succeeds
-    Expected Result: Filter compiles to valid BPF
-    Evidence: evidence/task-20-seccomp.txt
-
-  Scenario: Landlock ruleset creation
-    Tool: Bash
-    Steps:
-      1. Create Landlock ruleset with test paths
-      2. Assert: ruleset created without error
-      3. Skip enforcement test (requires kernel ≥ 5.13)
-    Expected Result: Ruleset creation succeeds
-    Evidence: evidence/task-20-landlock.txt
-  ```
-
-  **Commit**: NO (groups with T16-T19)
-
----
+  - [x] `no_new_privs`, non-dumpable, and `RLIMIT_CORE = 0` applied and asserted from a child
+  - [x] Namespace isolation verified by comparing namespace inodes before and after
+  - [x] seccomp allowlist applied; a denied syscall dies with SIGSYS
+  - [x] A test proves the filter does not break ordinary operation
+  - [x] The multithreading constraint on `unshare` is measured and documented
+  - [ ] Landlock filesystem restriction
+  - [ ] Allowlist derived from Dome's own trace rather than a cited baseline
 
 - [ ] 21. **M3 Integration Tests (Capability, Failure, Minimal Boot)**
 

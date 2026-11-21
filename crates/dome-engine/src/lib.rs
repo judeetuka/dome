@@ -22,6 +22,7 @@ pub enum EngineError {
 
 pub mod loader;
 pub mod memory;
+pub mod sandbox;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
