@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-> **Quick Summary**: Evolve Dome from a read-only capability probe (M1 partial) to a complete multi-platform sandbox engine. Build the `.dome` binary format, a Linux KVM engine, chamber lifecycle, OS builder, sentinel protocol, hardware apertures, and cross-platform engines — in 9 milestone waves with TDD at every step.
+> **Quick Summary**: Evolve Dome from a read-only capability probe (M1 done) to a complete multi-platform sandbox engine. Build the `.dome` binary format, a Linux KVM engine, chamber lifecycle, OS builder, sentinel protocol, hardware apertures, and cross-platform engines — in 9 milestone waves with TDD at every step.
 >
 > **Deliverables**:
 >
@@ -20,6 +20,37 @@
 > **Parallel Execution**: YES — Wave 0 plus 9 milestone waves with intra-wave parallelism
 > **Critical Path**: T59 (KVM spike, risk-death) → T61 (CLI contract) → M1 (parsing) → M2 (format) → T63 (virtio substrate) → M3 (engine) → M4 (lifecycle) → M5-M9
 > **Hard gate**: M2 and later cannot be validated without a host that exposes `/dev/kvm`. T59 settles this before any format work begins.
+
+---
+
+## Status (2026) — where the work actually stands
+
+Updated as tasks land. A task is only `[x]` when its acceptance criteria are met and the
+verification is reproducible from a clean checkout.
+
+| Milestone | Tasks | State |
+| --- | --- | --- |
+| Wave 0 + M1 (parsing, validation, CLI, CI) | T1, T3–T9 | **done** (8/8) |
+| Risk-death + decisions | T59–T62 | **done** (4/4) — spike, privilege ADR, CLI contract, hygiene |
+| **M2** format + crypto | T10–T14 | **1/5** — crypto done, `.dome` container pending |
+| **M3** engine | T15–T21 | **DONE** (7/7) — real kernel boots in-engine, inside the cage |
+| M3 sign-off gate | T67 | **partial** — CPUID policy, DMA refusal, cage done; device-set pin, I/O rate limits, fuzz owed |
+| M4 chambers, cgroups, netns | T22–T28, T63–T64 | not started — ADR 0001 settled the privileges, T63 substrate is the entry point |
+| M5 OS builder | T29–T32, T65 | not started |
+| M6 sentinel + display | T33–T37 | not started |
+| M7 apertures | T38–T42 | not started |
+| M8 macOS + Windows | T43–T48 | not started |
+| M9 ARM64 | T49–T52 | not started |
+| Hardening + release | T53–T58, T66 | not started |
+
+**Verified state of the tree**: 135 tests passing, `cargo fmt --check`, `cargo check`,
+`cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
+Evidence for every completed task is committed under `evidence/`.
+
+**What "M3 done" means concretely**: the engine loads the real Alpine 6.12 bzImage, builds the
+zero page, enters 32-bit protected mode, runs a vCPU with a filtered CPUID, services the 16550
+so the guest console is captured, and can boot that kernel *inside* the process cage
+(user/mount/net namespaces, Landlock, seccomp, no_new_privs, non-dumpable, no core dumps).
 
 ---
 
@@ -509,7 +540,7 @@ Max Concurrent: 6 (M1 wave)
 
 ## TODOs
 
-- [ ] 1. **CI Pipeline (GitHub Actions)**
+- [x] 1. **CI Pipeline (GitHub Actions)**
 
   **What to do**:
   - Create `.github/workflows/ci.yml` with the 4-command verification baseline:
@@ -589,6 +620,12 @@ Max Concurrent: 6 (M1 wave)
 
 - [ ] 2. **Async Runtime Foundation (Tokio)**
 
+  > **SUPERSEDED (2026)** — deliberately not built. The engine is synchronous: a vCPU is a
+  > thread doing a blocking `KVM_RUN`, and device work is a callback on that same thread.
+  > Wrapping that in an async runtime would add a scheduler, a wakeup path and a new class of
+  > cancellation bug in exchange for nothing. Revisit only if the supervisor grows a
+  > high-fan-out I/O workload that thread-per-chamber cannot carry.
+
   **What to do**:
   - **RESCOPED (Rev 2): defer tokio to M4.** Nothing in M1 is async, and `.rules/rust.md`
     says "avoid dependencies until a subsystem proves it needs them" — adding a runtime
@@ -649,7 +686,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 3. **Error Architecture (thiserror per crate)**
+- [x] 3. **Error Architecture (thiserror per crate)**
 
   **What to do**:
   - Add `thiserror = "2"` to workspace dependencies in root `Cargo.toml`
@@ -725,7 +762,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 4. **Serde + TOML Parsing (dome-config read path)**
+- [x] 4. **Serde + TOML Parsing (dome-config read path)**
 
   **What to do**:
   - Add `serde = { version = "1", features = ["derive"] }` and `toml = "0.8"` to workspace deps
@@ -789,7 +826,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Round-trip is lossless for a fully populated blueprint (14 tests in `dome-config`)
   - [x] All 41 workspace tests pass; clippy `-D warnings` clean
 
-- [ ] 5. **CLI Migration to clap**
+- [x] 5. **CLI Migration to clap**
 
   > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.
 
@@ -856,7 +893,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] `dome completions bash|zsh|fish|powershell|elvish` generates real completions
   - [x] `completions` stays hidden from `--help`
 
-- [ ] 6. **Blueprint Validation Rules**
+- [x] 6. **Blueprint Validation Rules**
 
   > **Grammar authority**: [`docs/cli-contract.md`](docs/cli-contract.md) (T61). Do not restate flags in this task; match the contract.
 
@@ -920,7 +957,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Aperture host/guest paths must be absolute; `/proc`, `/sys` and `/dev` blocked
   - [x] `dome validate` CLI wiring deferred to T5, which owns the command surface
 
-- [ ] 7. **Wire dome-device into dome-host-linux**
+- [x] 7. **Wire dome-device into dome-host-linux**
 
   **What to do**:
   - Add `dome-device` as a dependency of `dome-host-linux` in Cargo.toml
@@ -977,7 +1014,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Probes stay read-only; no device is bound or reserved
   - [x] Fixture covers isolated, shared and group-less devices (5 host tests)
 
-- [ ] 8. **dome-test-utils Crate**
+- [x] 8. **dome-test-utils Crate**
 
   **What to do**:
   - Create new crate `crates/dome-test-utils/` with `Cargo.toml` and `src/lib.rs`
@@ -1033,7 +1070,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Used as a `dev-dependency`, demonstrated by `dome-config`'s validation test
   - [x] Workspace total 73 tests, all four verification commands green
 
-- [ ] 9. **M1 Integration Tests (Round-Trip, Validation, Edge Cases)**
+- [x] 9. **M1 Integration Tests (Round-Trip, Validation, Edge Cases)**
 
   **What to do**:
   - Create `crates/dome-config/tests/round_trip.rs` — comprehensive round-trip test
@@ -1102,7 +1139,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] `cargo test --workspace` passes (87 tests)
   - [x] `cargo clippy --workspace --all-targets -- -D warnings` passes
 
-- [ ] 10. **dome-crypto Crate (aws-lc-rs + age integration)**
+- [x] 10. **dome-crypto Crate (aws-lc-rs + age integration)**
 
   **What to do**:
   - Create `crates/dome-crypto/` with `Cargo.toml` and `src/lib.rs`
@@ -1433,7 +1470,7 @@ Max Concurrent: 6 (M1 wave)
   - Message: `feat(m2): complete .dome format with dome-crypto, writer, reader, and integration tests`
   - Files: `crates/dome-crypto/`, `crates/dome-image/`, `crates/dome-cli/`
 
-- [ ] 15. **KVM Dependencies + unsafe Override**
+- [x] 15. **KVM Dependencies + unsafe Override**
 
   **What to do**:
   - Add to `dome-engine/Cargo.toml`:
@@ -1505,7 +1542,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 16. **LinuxEngine Struct (Engine trait implementation)**
+- [x] 16. **LinuxEngine Struct (Engine trait implementation)**
 
   **What to do**:
   - Implement `dome-engine/src/linux.rs` (behind `#[cfg(target_os = "linux")]`):
@@ -1555,7 +1592,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] `validate` rejects over-large chambers and uncontainable DMA apertures
   - [x] Five tests, each tolerant of a host without KVM
 
-- [ ] 17. **Guest Memory Manager (vm-memory integration)**
+- [x] 17. **Guest Memory Manager (vm-memory integration)**
 
   **What to do**:
   - Implement `dome-engine/src/memory.rs`:
@@ -1599,7 +1636,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] `host_address()` exposes the mapping KVM needs, stable across calls
   - [x] Seven tests
 
-- [ ] 18. **Kernel Loader (vmlinux + bzImage)**
+- [x] 18. **Kernel Loader (vmlinux + bzImage)**
 
   **What to do**:
   - Implement `dome-engine/src/loader.rs`:
@@ -1647,7 +1684,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Rejects unaligned, too-low, missing and too-large cases with typed errors
   - [x] Five tests including the real kernel
 
-- [ ] 19. **VCPU Lifecycle (create, init, run loop)**
+- [x] 19. **VCPU Lifecycle (create, init, run loop)**
 
   **What to do**:
   - Implement `dome-engine/src/vcpu.rs`:
@@ -1712,7 +1749,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Failure paths are typed errors, never panics
   - [ ] Multi-vCPU threads (needs T22's launch ordering; single vCPU is enough for M3)
 
-- [ ] 20. **Engine Process Sandbox (seccomp + Landlock)**
+- [x] 20. **Engine Process Sandbox (seccomp + Landlock)**
 
   > **Extended by ADR 0002 (D)** — the cage is not just seccomp + Landlock. It also needs its
   > own user/mount/pid/net namespace, a minimal read-only filesystem view, no capabilities,
@@ -1837,7 +1874,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] The real kernel boots inside the full cage
   - [x] Every ordering constraint documented where it is enforced
 
-- [ ] 21. **M3 Integration Tests (Capability, Failure, Minimal Boot)**
+- [x] 21. **M3 Integration Tests (Capability, Failure, Minimal Boot)**
 
   **What to do**:
   - Create `dome-engine/tests/engine_integration.rs`:
@@ -3204,7 +3241,7 @@ Max Concurrent: 6 (M1 wave)
 
   **Commit**: YES — `docs: add comprehensive changelog for M1-M9`
 
-- [ ] 59. **KVM Spike (timeboxed; gates every milestone after M1)**
+- [x] 59. **KVM Spike (timeboxed; gates every milestone after M1)**
 
   **What to do**:
   - One example, `crates/dome-engine/examples/kvm_spike.rs` — a probe, not production code
@@ -3283,7 +3320,7 @@ Max Concurrent: 6 (M1 wave)
   regress the expensive lessons: apply CPUID, filter it, create the irqchip, set
   `type_of_loader`, and route the UART interrupt before expecting a tty to work.
 
-- [ ] 60. **Capability Acquisition Decision (cgroups + CAP_NET_ADMIN)**
+- [x] 60. **Capability Acquisition Decision (cgroups + CAP_NET_ADMIN)**
 
   **What to do**:
   - Write `docs/adr/0001-privilege-acquisition.md`, then implement its choice
@@ -3345,7 +3382,7 @@ Max Concurrent: 6 (M1 wave)
   - [ ] `.rules/apertures.md` amended with the UID-sharing note (small follow-up, do with T38)
   - [ ] `.rules/project.md` M4 privilege position recorded (do with the first M4 task)
 
-- [ ] 61. **CLI Contract Document (freeze the grammar before any command is written)**
+- [x] 61. **CLI Contract Document (freeze the grammar before any command is written)**
 
   **What to do**:
   - Create `docs/cli-contract.md` — single source of truth for names, flags, exit codes,
@@ -3379,7 +3416,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 62. **Repo Hygiene (remainder — the noisy part is already done)**
+- [x] 62. **Repo Hygiene (remainder — the noisy part is already done)**
 
   **Already completed** (verified; do not redo, and do not let F1 re-flag it):
   - [x] `git config core.fileMode false` + `chmod 644` on all 136 tracked files — the
