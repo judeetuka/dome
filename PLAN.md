@@ -43,9 +43,10 @@
 | `KVM_GET_API_VERSION` | `12` | ABI present and as expected |
 | `KVM_GET_VCPU_MMAP_SIZE` | `12288` | the run struct is mappable |
 | `KVM_CREATE_VM` | **succeeds** | real VM creation, not just a device node |
-| `mkdir /sys/fs/cgroup/x` | `EACCES` (uid 1000, `Delegate=no`) | **cgroups block on the T60 decision**, not on hardware |
-| `ip netns add` | `EACCES` | no `CAP_NET_ADMIN` yet — same cause |
-| `unshare -Urn ip link add veth` | **works** | netns is testable today via user namespaces |
+| `mkdir <user-service cgroup>/x` | **works** — `Delegate=yes`, owned by the user | cgroups are usable **with no privilege** (ADR 0001) |
+| `memory.max` / `pids.max` write | **works** as uid 1000 | real limit enforcement, unprivileged |
+| `unshare -Urn` + `ip tuntap add` | **loopback up, TAP created** | netns and slirp-style networking need no `CAP_NET_ADMIN` |
+| `ip netns add` (host netns) | `EACCES` | irrelevant: Dome uses a user-owned netns, not the host one |
 | CPU / memory | 14 cores, 15 GiB | enough for real boot tests |
 | `cmake`, `perl`, `pkg-config`, `clang`, `gcc` | present | `aws-lc-sys` and KVM builds work |
 | `nasm` | absent | do not introduce NASM-syntax assembly |
@@ -54,7 +55,8 @@
 **Rules**:
 - The bar for "Linux engine verified" is a real kernel boot with a captured console log
   committed under `evidence/` — never a fixture-only pass.
-- Anything needing cgroup or netns privilege is blocked on **T60**, not on hardware.
+- **Nothing needs privilege.** ADR 0001 settles M4 on unprivileged cgroups plus user
+  namespaces, with no daemon and no sudo.
 - **T59 (KVM spike) is unblocked** and must report before M2 starts.
 
 ### 2. Dependency corrections (Rev 1 pins versions that do not exist)
@@ -337,7 +339,7 @@ framebuffer dumps, full `strace` output) are gitignored.
 ```
 Wave 0 (Kill the risk before building anything — 4 tasks, all parallel):
 ├── T59: KVM spike — KERNEL BOOTS on KVM, no QEMU [DONE]
-├── T60: Capability acquisition decision (cgroup delegation + CAP_NET_ADMIN) [deep]  ← GATES M4
+├── T60: Privileges settled — ZERO privilege, see ADR 0001 [DONE]
 ├── T61: CLI contract doc — pins the command grammar [DONE]  ← gates T5, T29
 └── T62: Repo hygiene — remainder: LICENSE, assets/, evidence policy [quick]
 
@@ -3169,8 +3171,24 @@ Max Concurrent: 6 (M1 wave)
   - [x] KVM plumbing independently verified by a self-test that fails loudly
   - [x] Reproducible: repeated runs reach the same panic at ~1.1-1.4 s
 
+  **Extended (userspace)**: with a cpio initramfs attached, the boot now reaches userspace:
+  `RAMDISK -> Unpacking initramfs -> Run /init as init process -> dome-init output`.
+  Evidence: `evidence/task-59-userspace.log`. Two more findings from that step:
+
+  - **`type_of_loader` gates the initrd entirely.** `reserve_initrd()` in
+    `arch/x86/kernel/setup.c` returns early on `!boot_params.hdr.type_of_loader`, so the
+    kernel ignores a perfectly valid `ramdisk_image`/`ramdisk_size` pair. Setting it to
+    `0xFF` ("undefined, private use") fixed a bug that no amount of zero-page readback
+    could explain.
+  - **Userspace writes to `/dev/console` need the UART TX interrupt.** `printk` polls the
+    port and works; a userspace `write()` is queued and drained by the 8250 driver's TX
+    interrupt handler, which never fires without IOAPIC/GSI routing. Direct port IO from
+    userspace works, which is how the acceptance evidence was captured. A real tty path
+    therefore needs interrupt routing — device-model work, as predicted.
+
   **Handover to M3**: the spike is the specification for the boot-protocol task. Do not
-  regress the three expensive lessons: apply CPUID, filter it, create the irqchip.
+  regress the expensive lessons: apply CPUID, filter it, create the irqchip, set
+  `type_of_loader`, and route the UART interrupt before expecting a tty to work.
 
 - [ ] 60. **Capability Acquisition Decision (cgroups + CAP_NET_ADMIN)**
 
@@ -3194,12 +3212,45 @@ Max Concurrent: 6 (M1 wave)
   **Parallelization**: Can Run In Parallel: YES with T59, T61, T62. **Blocks**: T22, T23.
   **Blocked By**: nothing.
 
-  **Acceptance Criteria**:
-  - [ ] ADR exists, states the chosen model, lists what each model enables
-  - [ ] `.rules/project.md` amended with the M4 privilege position
-  - [ ] `docs/known-limits.md` lists every check that cannot run on this host
+  **Status: COMPLETE** — decided and recorded in
+  [`docs/adr/0001-privilege-acquisition.md`](docs/adr/0001-privilege-acquisition.md).
 
----
+  **Decision: zero privilege.** The supervisor runs as the invoking user with no
+  capabilities, no setuid bits and no helper daemon:
+
+  - **cgroups** — each chamber gets a cgroup under the supervisor's own delegated
+    user-service subtree. Verified: `Delegate=yes`, `cpu memory pids` already enabled, and
+    `memory.max`/`pids.max` writable as uid 1000.
+  - **namespaces** — `CLONE_NEWUSER | CLONE_NEWNET` per chamber. Verified: `unshare -Urn`
+    brings up loopback and creates a TAP device, so no `CAP_NET_ADMIN` is needed.
+  - **networking** — closed perimeter by default; published ports are served by a listener
+    the supervisor opens as the user and forwarded into the chamber userspace stack
+    (slirp-style). No veth on the host, no nftables writes.
+
+  Both options originally offered were rejected with reasons: a capability-limited helper
+  (b) reintroduces the privileged surface for capability we already have, and a one-time
+  sudo (c) is unnecessary now that delegation is confirmed on for normal users.
+
+  Product requirements captured in the ADR:
+
+  - **Shared UID for apertures** — guest uid 1000 is host uid 1000 for aperture paths, so
+    files keep ownership and sharing needs no translation. The ADR states the trade this
+    makes: mapped writable paths carry the host user's own authority, mitigations are
+    read-only defaults plus explicit enumeration.
+  - **Defense engine runs host-side**, in the supervisor's plugin host, per
+    `.rules/plugins.md`; chamber-side telemetry stays advisory because a compromised
+    chamber can lie.
+  - The ADR states what Dome may and may not claim: hardware virtualization isolation and
+    no host state mutation are claimable; containment of a VM escape is **not** — it lands
+    with uid 1000 authority, exactly like the rootless-container position.
+
+  **Acceptance Criteria**:
+  - [x] ADR exists, states the chosen model and lists what each model enables
+  - [x] Chosen model verified on this host by probe, not assumed
+  - [x] Rejected options recorded with reasons
+  - [x] Isolation claims bounded explicitly, including the shared-UID trade
+  - [ ] `.rules/apertures.md` amended with the UID-sharing note (small follow-up, do with T38)
+  - [ ] `.rules/project.md` M4 privilege position recorded (do with the first M4 task)
 
 - [ ] 61. **CLI Contract Document (freeze the grammar before any command is written)**
 

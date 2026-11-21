@@ -32,17 +32,22 @@ const CMDLINE_ADDR: u64 = 0x0002_0000;
 const CMDLINE_CAPACITY: usize = 2048;
 const GUEST_MEMORY_SIZE: usize = 512 * 1024 * 1024;
 const SERIAL_PORT: u16 = 0x3F8;
+/// Where the initramfs is placed. High enough to clear the decompressor at ~16 MiB.
+const INITRD_ADDR: u64 = 0x1000_0000;
 
 const SELECTOR_CODE: u16 = 0x8;
 const SELECTOR_DATA: u16 = 0x10;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let kernel_path = args.next().ok_or("usage: kvm_spike <bzImage> [seconds]")?;
+    let kernel_path = args
+        .next()
+        .ok_or("usage: kvm_spike <bzImage|selftest> [seconds] [initramfs.cpio.gz]")?;
     let run_seconds: u64 = match args.next() {
         Some(value) => value.parse()?,
         None => 15,
     };
+    let initrd_path = args.next();
 
     let started = Instant::now();
 
@@ -110,16 +115,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut header = loaded.setup_header.ok_or("bzImage has no setup header")?;
 
     let mut cmdline = Cmdline::new(CMDLINE_CAPACITY)?;
-    cmdline.insert_str("console=ttyS0 earlyprintk=ttyS0 keep_bootcon panic=1")?;
+    cmdline.insert_str("console=ttyS0 earlyprintk=ttyS0 keep_bootcon panic=1 rdinit=/init")?;
     let cmdline_bytes = cmdline.as_cstring()?.into_bytes_with_nul();
+    if let Some(path) = initrd_path {
+        // Placed high in RAM, clear of the decompressor's workspace near 16 MiB.
+        let initrd = std::fs::read(&path)?;
+        guest_memory.write_slice(&initrd, GuestAddress(INITRD_ADDR))?;
+        header.ramdisk_image = INITRD_ADDR as u32;
+        header.ramdisk_size = initrd.len() as u32;
+        println!(
+            "loaded initramfs at {INITRD_ADDR:#x} ({} bytes) from {path}",
+            initrd.len()
+        );
+    }
+
     guest_memory.write_slice(&cmdline_bytes, GuestAddress(CMDLINE_ADDR))?;
 
     header.cmd_line_ptr = CMDLINE_ADDR as u32;
     header.cmdline_size = cmdline_bytes.len() as u32;
     // LOADED_HIGH (bit 0) must be set for a kernel entered in 32-bit protected mode.
     header.loadflags |= 0x01;
+    // The kernel ignores the initrd entirely unless a bootloader identifies itself:
+    // reserve_initrd() returns early on !type_of_loader. 0xFF means "undefined, private
+    // use" per the boot protocol.
+    header.type_of_loader = 0xFF;
     header.code32_start = KERNEL_START as u32;
 
+    // setup_header is #[repr(packed)]: reading fields into locals first avoids forming
+    // a misaligned reference, which would be undefined behaviour.
+    let ramdisk_image = header.ramdisk_image;
+    let ramdisk_size = header.ramdisk_size;
+    let initrd_addr_max = header.initrd_addr_max;
+    let header_version = header.version;
+    println!(
+        "initrd fields: image={ramdisk_image:#x} size={ramdisk_size:#x} \
+         initrd_addr_max={initrd_addr_max:#x} version={header_version:#x}"
+    );
     guest_memory.write_obj(header, GuestAddress(ZERO_PAGE + SETUP_HEADER_OFFSET))?;
     write_e820_map(&guest_memory)?;
     println!("zero page armed at {ZERO_PAGE:#x} with an e820 map");

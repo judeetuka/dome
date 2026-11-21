@@ -1,0 +1,226 @@
+# T59 — userspace reached in the guest
+# command: cargo run -p dome-engine --example kvm_spike -- tests/fixtures/kernel/vmlinuz-virt 12 tests/fixtures/kernel/initramfs.cpio.gz
+# initramfs built by scripts/build-test-initramfs.sh (static /init, cpio.gz)
+#
+# Proves: kernel boot -> initramfs unpacked -> /init executed as userspace -> userspace
+# can drive the UART and the host sees it.
+
+kvm api version: 12
+vcpu mmap size:  12288
+created vm
+created in-kernel irqchip (LAPIC + IOAPIC + PIC)
+mapped 512 MiB of guest memory
+loaded kernel at 0x100000, init_size 39604224 bytes
+loaded initramfs at 0x10000000 (364222 bytes) from tests/fixtures/kernel/initramfs.cpio.gz
+initrd fields: image=0x10000000 size=0x58ebe initrd_addr_max=0x7fffffff version=0x20f
+zero page readback: image=0x10000000 size=0x58ebe
+zero page armed at 0x7000 with an e820 map
+applied 58 cpuid entries (CET masked)
+entering kernel at 0x100000
+[    0.000000] Linux version 6.12.115-0-virt (buildozer@build-3-21-x86_64) (gcc (Alpine 14.2.0) 14.2.0, GNU ld (GNU Binutils) 2.43.1) #1-Alpine SMP PREEMPT_DYNAMIC 2026-11-01 15:08:12
+[    0.000000] Command line: console=ttyS0 earlyprintk=ttyS0 keep_bootcon panic=1 rdinit=/init debug ignore_loglevel
+[    0.000000] Disabled fast string operations
+[    0.000000] x86/split lock detection: #DB: warning on user-space bus_locks
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009efff] usable
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001fffffff] usable
+[    0.000000] printk: debug: skip boot console de-registration.
+[    0.000000] printk: debug: ignoring loglevel setting.
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI not present or invalid.
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x20000 max_arch_pfn = 0x400000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000002] kvm-clock: using sched offset of 358618067 cycles
+[    0.000006] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000016] tsc: Detected 3264.000 MHz processor
+[    0.000051] e820: update [mem 0x00000000-0x00000fff] usable ==> reserved
+[    0.000054] e820: remove [mem 0x000a0000-0x000fffff] usable
+[    0.000058] last_pfn = 0x20000 max_arch_pfn = 0x400000000
+[    0.000108] MTRRs disabled by BIOS
+[    0.000114] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.016850] Using GB pages for direct mapping
+[    0.016981] RAMDISK: [mem 0x10000000-0x10058fff]
+[    0.016988] ACPI: Early table checksum verification disabled
+[    0.017066] ACPI BIOS Error (bug): A valid RSDP was not found (20240827/tbxfroot-222)
+[    0.018008] Zone ranges:
+[    0.018013]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.018018]   DMA32    [mem 0x0000000001000000-0x000000001fffffff]
+[    0.018020]   Normal   empty
+[    0.018022] Movable zone start for each node
+[    0.018022] Early memory node ranges
+[    0.018023]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.018025]   node   0: [mem 0x0000000000100000-0x000000001fffffff]
+[    0.018027] Initmem setup node 0 [mem 0x0000000000001000-0x000000001fffffff]
+[    0.018057] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.018363] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.028022] TSC deadline timer available
+[    0.028065] CPU topo: Max. logical packages:   1
+[    0.028072] CPU topo: Max. logical dies:       1
+[    0.028073] CPU topo: Max. dies per package:   1
+[    0.028080] CPU topo: Max. threads per core:   1
+[    0.028082] CPU topo: Num. cores per package:     1
+[    0.028083] CPU topo: Num. threads per package:   1
+[    0.028084] CPU topo: Allowing 1 present CPUs plus 0 hotplug CPUs
+[    0.028143] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.028199] [mem 0x20000000-0xffffffff] available for PCI devices
+[    0.028203] Booting paravirtualized kernel on KVM
+[    0.028205] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[    0.038423] setup_percpu: NR_CPUS:256 nr_cpumask_bits:1 nr_cpu_ids:1 nr_node_ids:1
+[    0.039367] percpu: Embedded 59 pages/cpu s204184 r8192 d29288 u2097152
+[    0.039380] pcpu-alloc: s204184 r8192 d29288 u2097152 alloc=1*2097152
+[    0.039386] pcpu-alloc: [0] 0 
+[    0.039479] kvm-guest: PV spinlocks disabled, single CPU
+[    0.039483] Kernel command line: console=ttyS0 earlyprintk=ttyS0 keep_bootcon panic=1 rdinit=/init debug ignore_loglevel
+[    0.039630] Unknown kernel command line parameters "earlyprintk=ttyS0", will be passed to user space.
+[    0.039657] random: crng init done
+[    0.040609] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.040896] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.040971] Built 1 zonelists, mobility grouping on.  Total pages: 130974
+[    0.042695] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.046417] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.047479] Dynamic Preempt: none
+[    0.047898] rcu: Preemptible hierarchical RCU implementation.
+[    0.047900] rcu: 	RCU restricting CPUs from NR_CPUS=256 to nr_cpu_ids=1.
+[    0.047904] 	Trampoline variant of Tasks RCU enabled.
+[    0.047905] 	Tracing variant of Tasks RCU enabled.
+[    0.047906] rcu: RCU calculated value of scheduler-enlistment delay is 10 jiffies.
+[    0.047908] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.047917] RCU Tasks: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.047920] RCU Tasks Trace: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.058422] NR_IRQS: 16640, nr_irqs: 32, preallocated irqs: 16
+[    0.058812] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.058836] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[    0.059066] kfence: initialized - using 2097152 bytes for 255 objects at 0x(____ptrval____)-0x(____ptrval____)
+[    0.059199] Console: colour dummy device 80x25
+[    0.059405] printk: legacy console [ttyS0] enabled
+[    0.263630] APIC: ACPI MADT or MP tables are not detected
+[    0.264445] APIC: Switch to virtual wire mode setup with no configuration
+[    0.265604] Not enabling interrupt remapping due to skipped IO-APIC setup
+[    0.266699] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x2f0c74cf5f8, max_idle_ns: 440795302822 ns
+[    0.268403] Calibrating delay loop (skipped) preset value.. 6528.00 BogoMIPS (lpj=32640000)
+[    0.270020] [Firmware Bug]: CPU   0: APIC ID mismatch. CPUID: 0x0010 APIC: 0x0000
+[    0.271160] Disabled fast string operations
+[    0.272054] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.273189] Last level iTLB entries: 4KB 0, 2MB 0, 4MB 0
+[    0.274158] Last level dTLB entries: 4KB 0, 2MB 0, 4MB 0, 1GB 0
+[    0.275453] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.277059] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.277996] Spectre V2 : Enabling IBPB for BPF
+[    0.278392] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.278392] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.278392] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.278392] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.278392] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.278392] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.278392] x86/fpu: Enabled xstate features 0x7, context size is 832 bytes, using 'compacted' format.
+[    0.278392] Freeing SMP alternatives memory: 36K
+[    0.278392] pid_max: default: 32768 minimum: 301
+[    0.278392] LSM: initializing lsm=lockdown,capability,landlock
+[    0.278392] landlock: Up and running.
+[    0.278392] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.278392] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.278392] smpboot: SMP disabled
+[    0.278392] Performance Events: unsupported p6 CPU model 181 no PMU driver, software events only.
+[    0.278392] signal: max sigframe size: 1776
+[    0.278392] rcu: Hierarchical SRCU implementation.
+[    0.278392] rcu: 	Max phase no-delay instances is 1000.
+[    0.278392] NMI watchdog: Perf NMI watchdog permanently disabled
+[    0.278392] smp: Bringing up secondary CPUs ...
+[    0.278392] smp: Brought up 1 node, 1 CPU
+[    0.278392] smpboot: Total of 1 processors activated (6528.00 BogoMIPS)
+[    0.278392] Memory: 473568K/523896K available (14336K kernel code, 1938K rwdata, 9232K rodata, 2808K init, 1424K bss, 47400K reserved, 0K cma-reserved)
+[    0.278392] devtmpfs: initialized
+[    0.278392] x86/mm: Memory block size: 128MB
+[    0.278392] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.278392] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.278392] audit: initializing netlink subsys (disabled)
+[    0.278392] thermal_sys: Registered thermal governor 'step_wise'
+[    0.278392] audit: type=2000 audit(1795251278.994:1): state=initialized audit_enabled=0 res=1
+[    0.278392] cpuidle: using governor ladder
+[    0.278392] cpuidle: using governor menu
+[    0.278392] PCI: Fatal: No config space access function found
+[    0.278392] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.278392] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.278392] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.278392] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.278392] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.278392] ACPI: Interpreter disabled.
+[    0.278392] iommu: Default domain type: Translated
+[    0.278392] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.278392] SCSI subsystem initialized
+[    0.278392] libata version 3.00 loaded.
+[    0.278392] pps_core: LinuxPPS API ver. 1 registered
+[    0.278392] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.278392] PTP clock support registered
+[    0.278392] PCI: System does not support PCI
+[    0.278392] clocksource: Switched to clocksource kvm-clock
+[    0.278392] VFS: Disk quotas dquot_6.6.0
+[    0.278392] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.278392] pnp: PnP ACPI: disabled
+[    0.278392] NET: Registered PF_INET protocol family
+[    0.278392] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.278392] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.278392] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.278392] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.278392] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.278392] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.278392] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.278392] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.278392] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.278392] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.278392] NET: Registered PF_XDP protocol family
+[    0.278392] PCI: CLS 0 bytes, default 64
+[    0.278392] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x2f0c74cf5f8, max_idle_ns: 440795302822 ns
+[    0.278392] Unpacking initramfs...
+[    0.278392] Freeing initrd memory: 356K
+[    0.278392] clocksource: Switched to clocksource tsc
+[    0.278392] platform rtc_cmos: registered platform RTC device (no PNP device found)
+[    0.278392] Initialise system trusted keyrings
+[    0.278392] workingset: timestamp_bits=46 max_order=17 bucket_order=0
+[    0.278392] Key type asymmetric registered
+[    0.278392] Asymmetric key parser 'x509' registered
+[    0.278392] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 247)
+[    0.278392] io scheduler mq-deadline registered
+[    0.278392] io scheduler kyber registered
+[    0.278392] io scheduler bfq registered
+[    0.278392] ERST DBG: ERST support is disabled.
+[    0.278392] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    0.278392] VMware PVSCSI driver - version 1.0.7.0-k
+[    0.278392] hv_vmbus: registering driver hv_netvsc
+[    0.278392] i8042: PNP: No PS/2 controller found.
+[    0.278392] i8042: Probing ports directly.
+[    0.278392] i8042: Can't read CTR while initializing i8042
+[    0.278392] i8042 i8042: probe with driver i8042 failed with error -5
+[    0.278392] hv_vmbus: registering driver hyperv_keyboard
+[    0.278392] rtc_cmos rtc_cmos: only 24-hr supported
+[    0.278392] intel_pstate: CPU model not supported
+[    0.278392] gre: GRE over IPv4 demultiplexor driver
+[    0.278392] NET: Registered PF_INET6 protocol family
+[    0.278392] Segment Routing with IPv6
+[    0.278392] In-situ OAM (IOAM) with IPv6
+[    0.278392] Key type dns_resolver registered
+[    0.278392] IPI shorthand broadcast: enabled
+[    0.278392] sched_clock: Marking stable (58834021, 209558435)->(268392456, 0)
+[    1.334815] registered taskstats version 1
+[    1.337349] Loading compiled-in X.509 certificates
+[    1.343150] Loaded X.509 cert 'alpinelinux.org: Alpine Linux kernel key: d76a695f66ad9cd28f5c22a8508f36e91f521f7a'
+[    1.349870] Key type .fscrypt registered
+[    1.352027] Key type fscrypt-provisioning registered
+[    1.371686] Freeing unused kernel image (initmem) memory: 2808K
+[    1.376087] Write protecting the kernel read-only data: 24576k
+[    1.380857] Freeing unused kernel image (rodata/data gap) memory: 1008K
+[    1.384014] rodata_test: all tests were successful
+[    1.385913] Run /init as init process
+[    1.387413]   with arguments:
+[    1.388738]     /init
+[    1.389768]   with environment:
+[    1.391089]     HOME=/
+[    1.393318]     TERM=linux
+[    1.395101]     earlyprintk=ttyS0
+dome-init: direct serial write from userspace
+[    1.400711] reboot: Power off not available: System halted instead
+
+[spike] 13645 bytes of console output after 12s
+[spike] total elapsed: 12.047784647s
