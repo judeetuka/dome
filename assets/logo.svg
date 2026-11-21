@@ -1,0 +1,48 @@
+<svg
+  width="64"
+  height="64"
+  viewBox="0 0 64 64"
+  role="img"
+  aria-labelledby="dome-logo-title dome-logo-desc"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <title id="dome-logo-title">Dome logo</title>
+  <desc id="dome-logo-desc">
+    A shield enclosing a secure dome chamber with an aperture and hex cell foundation.
+  </desc>
+
+  <path
+    d="M32 5 54 15v14c0 15-9 25-22 30-13-5-22-15-22-30V15L32 5Z"
+    fill="#07111F"
+    stroke="#E6EDF7"
+    stroke-width="3"
+    stroke-linejoin="round"
+  />
+
+  <path
+    d="M18 37a14 14 0 0 1 28 0"
+    fill="none"
+    stroke="#E6EDF7"
+    stroke-width="3"
+    stroke-linecap="round"
+  />
+
+  <circle
+    cx="32"
+    cy="31"
+    r="5"
+    fill="none"
+    stroke="#38DDBB"
+    stroke-width="3"
+  />
+
+  <circle cx="32" cy="31" r="1.8" fill="#38DDBB" />
+
+  <path
+    d="M24 43l4-2 4 2v4l-4 2-4-2Z M32 43l4-2 4 2v4l-4 2-4-2Z"
+    fill="none"
+    stroke="#E6EDF7"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+</svg>
