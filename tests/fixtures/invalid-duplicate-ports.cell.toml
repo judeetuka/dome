@@ -1,0 +1,20 @@
+# Invalid: the same host port is published twice for the same protocol.
+[cell]
+foundation = "dome/buildroot:minimal"
+
+[limits]
+memory_mib = 512
+storage_mib = 2048
+cpus = 1
+
+[[perimeter.ports]]
+host_addr = "127.0.0.1"
+host_port = 8080
+guest_port = 80
+protocol = "tcp"
+
+[[perimeter.ports]]
+host_addr = "127.0.0.1"
+host_port = 8080
+guest_port = 8080
+protocol = "tcp"

@@ -1,0 +1,13 @@
+# Invalid: /dev/mem is a blocked host path under .rules/apertures.md.
+[cell]
+foundation = "dome/buildroot:minimal"
+
+[limits]
+memory_mib = 512
+storage_mib = 2048
+cpus = 1
+
+[[apertures.files]]
+host = "/dev/mem"
+guest = "/dev/mem"
+mode = "read-write"

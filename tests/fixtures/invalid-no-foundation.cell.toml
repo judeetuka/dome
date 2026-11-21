@@ -1,0 +1,5 @@
+# Invalid: no [cell] table, so there is no foundation to boot.
+[limits]
+memory_mib = 512
+storage_mib = 2048
+cpus = 1

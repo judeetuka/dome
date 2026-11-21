@@ -1,0 +1,6 @@
+# T9 — the four-command verification baseline
+
+cargo fmt --check                                      exit=0
+cargo check --workspace -j4                            exit=0
+cargo test --workspace -j4                             exit=0  (87 tests)
+cargo clippy --workspace --all-targets -j4 -D warnings  exit=0

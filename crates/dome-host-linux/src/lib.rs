@@ -88,6 +88,7 @@ impl HostReport {
             virtualization: VirtualizationReport {
                 cpu_virtualization_flag: has_virtualization_flag(&cpuinfo),
                 kvm_device_available: root.exists("/dev/kvm"),
+                kvm_device_readable: can_open_read_write(root, "/dev/kvm"),
             },
             iommu: IommuReport {
                 groups_detected: root.has_directory_entries("/sys/kernel/iommu_groups"),
@@ -128,7 +129,8 @@ impl HostReport {
                 "kernel_version = {}\n\n",
                 "[virtualization]\n",
                 "cpu_virtualization_flag = {}\n",
-                "native_engine_device_available = {}\n\n",
+                "native_engine_device_available = {}\n",
+                "native_engine_device_readable = {}\n\n",
                 "[iommu]\n",
                 "groups_detected = {}\n\n",
                 "[vfio]\n",
@@ -149,6 +151,7 @@ impl HostReport {
             toml_option_string(self.platform.kernel_version.as_deref()),
             self.virtualization.cpu_virtualization_flag,
             self.virtualization.kvm_device_available,
+            self.virtualization.kvm_device_readable,
             self.iommu.groups_detected,
             self.vfio.device_available,
             self.vfio.module_loaded,
@@ -191,6 +194,7 @@ impl HostReport {
                 "Dome host capability report\n",
                 "kernel: {}\n",
                 "native engine device: {}\n",
+                "native engine device readable: {}\n",
                 "cpu virtualization flag: {}\n",
                 "iommu groups: {}\n",
                 "vfio device: {}\n",
@@ -203,6 +207,7 @@ impl HostReport {
             ),
             self.platform.kernel_version.as_deref().unwrap_or("unknown"),
             yes_no(self.virtualization.kvm_device_available),
+            yes_no(self.virtualization.kvm_device_readable),
             yes_no(self.virtualization.cpu_virtualization_flag),
             yes_no(self.iommu.groups_detected),
             yes_no(self.vfio.device_available),
@@ -233,6 +238,12 @@ pub struct PlatformReport {
 pub struct VirtualizationReport {
     pub cpu_virtualization_flag: bool,
     pub kvm_device_available: bool,
+    /// Whether the engine could actually open the device read-write.
+    ///
+    /// `kvm_device_available` only proves a path exists. A container can have the node
+    /// bind-mounted with the wrong group, or with no access at all, and the engine still
+    /// needs O_RDWR to talk to KVM. This is the difference between "present" and "usable".
+    pub kvm_device_readable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,6 +375,18 @@ fn classify_pci_class(raw: &str) -> DeviceClass {
         0x0c => DeviceClass::UsbController,
         _ => DeviceClass::PciOther,
     }
+}
+
+/// Whether the engine could open this path read-write.
+///
+/// Deliberately opens read-write, because that is what the KVM engine needs; a read-only
+/// check would report success on a device the engine cannot use.
+fn can_open_read_write(root: &ProbeRoot, path: &str) -> bool {
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.path(path))
+        .is_ok()
 }
 
 fn has_virtualization_flag(cpuinfo: &str) -> bool {
