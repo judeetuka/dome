@@ -86,6 +86,16 @@ impl GuestMemory {
         Ok(buffer)
     }
 
+    /// Copy the whole region out, for a seal.
+    ///
+    /// This allocates the full guest size; a seal of a 512 MiB chamber costs 512 MiB of host
+    /// memory for the duration. Streaming to a file would avoid that and is the obvious next
+    /// step when seals grow, which is why this is a separate function rather than something
+    /// `launch` does.
+    pub fn capture(&self) -> Result<Vec<u8>, EngineError> {
+        self.read(0, self.size_bytes() as usize)
+    }
+
     fn check_range(&self, address: u64, length: u64, operation: &str) -> Result<(), EngineError> {
         let end = address
             .checked_add(length)

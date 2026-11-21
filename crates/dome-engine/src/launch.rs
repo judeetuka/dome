@@ -18,7 +18,7 @@ use crate::linux::LinuxEngine;
 use crate::loader::{MIN_KERNEL_ADDRESS, load_bzimage};
 use crate::memory::GuestMemory;
 use crate::sandbox;
-use crate::vcpu::{SerialDevice, Vcpu, VcpuEntry, VcpuStop, map_guest_memory};
+use crate::vcpu::{SerialDevice, Vcpu, VcpuEntry, VcpuSnapshot, VcpuStop, map_guest_memory};
 
 /// Upper bound on device exits before a launch is abandoned.
 ///
@@ -46,6 +46,13 @@ pub struct LaunchRequest {
     pub cage: bool,
     /// Wall-clock limit for the whole boot.
     pub timeout: Duration,
+    /// Capture guest memory and CPU state when the run ends, for a seal.
+    ///
+    /// This is a **post-mortem** capture: the snapshot is taken after the run loop stops, so
+    /// the CPU reflects the terminal state. A guest that halted cleanly is paused; one that
+    /// triple-faulted is in its reset state, where CR0.PE is clear. Freezing a live guest
+    /// mid-flight needs the sentinel (T33), and this flag does not pretend otherwise.
+    pub capture_state: bool,
     /// Trap on denied syscalls instead of killing, so the number is reported.
     pub diagnose_cage: bool,
 }
@@ -61,6 +68,7 @@ impl LaunchRequest {
             cage: false,
             timeout: Duration::from_secs(60),
             diagnose_cage: false,
+            capture_state: false,
         }
     }
 
@@ -83,6 +91,15 @@ impl LaunchRequest {
     }
 }
 
+/// Guest state captured at the end of a run.
+#[derive(Debug, Clone)]
+pub struct CapturedState {
+    /// The whole of guest RAM, as a seal would store it.
+    pub memory: Vec<u8>,
+    /// The vCPU's architectural state.
+    pub registers: VcpuSnapshot,
+}
+
 /// How a launch ended.
 #[derive(Debug, Clone)]
 pub struct BootOutcome {
@@ -94,6 +111,8 @@ pub struct BootOutcome {
     pub stopped: bool,
     /// The wall-clock limit expired first.
     pub timed_out: bool,
+    /// Captured state, present only when the request asked for it.
+    pub captured: Option<CapturedState>,
 }
 
 impl LinuxEngine {
@@ -210,11 +229,23 @@ impl LinuxEngine {
         finished.store(true, Ordering::Relaxed);
         let _ = watchdog.join();
 
+        // Capture after the loop: the guest is quiescent here, which is the coldest point a
+        // synchronous launch can offer without a sentinel to freeze it.
+        let captured = if request.capture_state {
+            Some(CapturedState {
+                memory: memory.capture()?,
+                registers: vcpu.snapshot()?,
+            })
+        } else {
+            None
+        };
+
         Ok(BootOutcome {
             console: serial.text(),
             exits,
             stopped,
             timed_out,
+            captured,
         })
     }
 }

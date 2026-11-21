@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 223 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 233 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -2341,6 +2341,28 @@ Max Concurrent: 6 (M1 wave)
   **Recommended Agent Profile**: `deep` — state capture + crypto
   **Parallelization**: Can Run In Parallel YES with T27 | Blocks: T28 | Blocked By: T25
   **References**: `.rules/security.md:23-28` — Seal security model; `crates/dome-image/src/writer.rs` — DomeWriter
+
+  > **STATUS: state capture and the seal format are done; the CLI command is owed.**
+  >
+  > Done: `crates/dome-image/src/seal.rs` (a seal is a suite-2 container whose payload is
+  > named sections), `dome-engine` state capture (`capture_state`, `GuestMemory::capture`,
+  > `Vcpu::snapshot`), `crates/dome-image/SECURITY.md`, and **ten tests**.
+  >
+  > The payload is sections rather than a struct so a field can be added later without
+  > changing what an old seal means, and so a reader that does not know a section can still
+  > open the rest. A hostile section count is refused before any allocation, section names are
+  > validated, and guest memory is proven not to appear in the clear.
+  >
+  > **An honest limit found while testing:** capture is **post-mortem**. Memory and registers
+  > are read after the run loop stops, so a guest that triple-faulted is in its reset state and
+  > CR0.PE is legitimately clear. My first test asserted a live-guest property on that data and
+  > failed; the test was wrong, and the distinction is now in the doc comment. Freezing a live
+  > guest mid-flight needs the sentinel, and this flag does not pretend to do it.
+  >
+  > **Owed, deliberately:** `dome seal <chamber-id>` needs a registry of running chambers,
+  > which does not exist until the CLI drives a real chamber lifecycle. Implementing a
+  > `dome seal` that booted its own kernel would be a different command wearing the right name.
+  > It lands with T28, and this note is here so it is not quietly forgotten.
 
   **Acceptance Criteria**:
   - [ ] `seal()` produces a valid `.seal.dome` file

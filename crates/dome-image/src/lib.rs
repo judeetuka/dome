@@ -3,6 +3,7 @@ pub mod header;
 pub mod image_error;
 pub mod manifest;
 pub mod reader;
+pub mod seal;
 pub mod writer;
 
 pub use image_error::ImageError;

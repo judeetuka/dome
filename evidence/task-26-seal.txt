@@ -1,0 +1,19 @@
+# T26 — chamber seal (state capture + format); CLI owed
+# command: cargo test -p dome-image -p dome-engine -j4
+
+seal format:
+  a_seal_round_trips_through_encryption_and_both_signatures ... ok
+  guest_memory_travels_in_the_seal ... ok
+  tampering_with_a_seal_breaks_its_signature ... ok
+  a_seal_needs_the_right_key ... ok
+  section_names_are_validated ... ok
+  setting_a_section_twice_replaces_it ... ok
+  an_absurd_section_count_is_refused_before_allocating ... ok
+  a_truncated_payload_is_refused ... ok
+
+engine capture (real boot):
+  captures_guest_state_when_asked ... ok
+  capture_is_off_unless_requested ... ok
+
+# note: capture is post-mortem. a guest that triple-faulted is in its reset state,
+# which is why the first version of the test failed and was corrected.

@@ -57,6 +57,29 @@ pub trait VcpuIo {
     fn mmio_write(&mut self, _address: u64, _data: &[u8]) {}
 }
 
+/// The vCPU's architectural state at a moment in time.
+///
+/// Deliberately a small, explicit record rather than a raw `kvm_regs`: a seal has to stay
+/// readable by a future version, and a struct laid out by the kernel's ABI is not a stable
+/// format to put on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VcpuSnapshot {
+    /// Instruction pointer.
+    pub rip: u64,
+    /// Stack pointer.
+    pub rsp: u64,
+    /// Flags register.
+    pub rflags: u64,
+    /// Control register 0, including the protected-mode bit.
+    pub cr0: u64,
+    /// Control register 3, the page-table base.
+    pub cr3: u64,
+    /// Code segment selector.
+    pub cs: u16,
+    /// Stack segment selector.
+    pub ss: u16,
+}
+
 /// A 16550 UART that captures what the guest writes.
 ///
 /// The status registers matter more than the data register: a guest that polls the line
@@ -156,6 +179,27 @@ impl Vcpu {
             .map_err(|error| EngineError::Setup(format!("cannot set regs: {error}")))?;
 
         Ok(Self { fd })
+    }
+
+    /// Capture the architectural state without disturbing the guest.
+    pub fn snapshot(&self) -> Result<VcpuSnapshot, EngineError> {
+        let regs = self
+            .fd
+            .get_regs()
+            .map_err(|error| EngineError::Setup(format!("cannot read registers: {error}")))?;
+        let sregs = self.fd.get_sregs().map_err(|error| {
+            EngineError::Setup(format!("cannot read segment registers: {error}"))
+        })?;
+
+        Ok(VcpuSnapshot {
+            rip: regs.rip,
+            rsp: regs.rsp,
+            rflags: regs.rflags,
+            cr0: sregs.cr0,
+            cr3: sregs.cr3,
+            cs: sregs.cs.selector,
+            ss: sregs.ss.selector,
+        })
     }
 
     /// Run until the guest touches a device, halts, or shuts down.

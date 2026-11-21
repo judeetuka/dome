@@ -166,3 +166,59 @@ fn a_missing_kernel_is_a_typed_error() {
 
     assert!(matches!(error, EngineError::Setup(_)), "got {error:?}");
 }
+
+#[test]
+fn captures_guest_state_when_asked() {
+    let Some(engine) = engine_or_skip() else {
+        return;
+    };
+    let Some(kernel) = kernel_or_skip() else {
+        return;
+    };
+
+    let mut request = request_for(kernel);
+    request.timeout = Duration::from_secs(3);
+    request.capture_state = true;
+
+    let outcome = engine.launch(&request).expect("launch");
+    let captured = outcome.captured.expect("state should have been captured");
+
+    // The whole of guest RAM is captured, at the size the request asked for.
+    assert_eq!(captured.memory.len(), 512 * 1024 * 1024);
+    assert!(
+        captured.memory.iter().any(|byte| *byte != 0),
+        "captured memory is empty"
+    );
+
+    // The CPU state is captured, but this is a post-mortem snapshot: the guest above ran
+    // without a root filesystem, panicked and reset, so CR0.PE is legitimately clear. What can
+    // be asserted is that the registers are real values from the kernel's view of the vCPU.
+    assert_eq!(
+        captured.registers.cr3 & 0xFFF,
+        0,
+        "CR3 always has zero low bits"
+    );
+    assert_ne!(
+        captured.registers.rflags, 0,
+        "the flags register was never captured"
+    );
+}
+
+#[test]
+fn capture_is_off_unless_requested() {
+    let Some(engine) = engine_or_skip() else {
+        return;
+    };
+    let Some(kernel) = kernel_or_skip() else {
+        return;
+    };
+
+    let mut request = request_for(kernel);
+    request.timeout = Duration::from_secs(2);
+
+    let outcome = engine.launch(&request).expect("launch");
+    assert!(
+        outcome.captured.is_none(),
+        "capture must not happen by default"
+    );
+}
