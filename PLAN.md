@@ -43,7 +43,18 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 366 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 366 tests passing
+
+**Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
+ticked, even though the work and its evidence existed. They are now checked, each verified
+against the code or a test rather than flipped in bulk. Three remain unchecked on purpose:
+
+- T1: CI requires a push, which has not happened.
+- T15: a commit message cannot be checked after the fact.
+- **T68: specification vectors are genuinely missing.** aws-lc-rs is FIPS-validated for ML-KEM-768
+  and ML-DSA-65 themselves, but *our composition* — the RFC 10024 concatenation order and the
+  HKDF schedule — has no known-answer test. The round-trip tests would pass even if the order
+  were reversed on both sides, which is exactly what a vector would catch., `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -1335,11 +1346,11 @@ Max Concurrent: 6 (M1 wave)
   **Completed** (2026), together with T13. `crates/dome-image/src/writer.rs`: header, sealed manifest, chunk table (offset/length/nonce/hash per 64 KiB chunk), chunk payloads, then an Ed25519 signature over every preceding byte. Signature placement means the chunk table cannot be edited without invalidating the file.
 
   **Acceptance Criteria**:
-  - [ ] `DomeWriter` produces a valid `.dome` file
-  - [ ] Written file has correct magic bytes, version, header layout
-  - [ ] Chunks are encrypted and verifiable
-  - [ ] Signature covers the entire file
-  - [ ] Memory usage is bounded (not loading entire file into RAM)
+  - [x] `DomeWriter` produces a valid `.dome` file
+  - [x] Written file has correct magic bytes, version, header layout
+  - [x] Chunks are encrypted and verifiable
+  - [x] Signature covers the entire file
+  - [x] Memory usage is bounded (not loading entire file into RAM)
 
   **QA Scenarios**:
 
@@ -1395,11 +1406,11 @@ Max Concurrent: 6 (M1 wave)
   **Completed** (2026). `crates/dome-image/src/reader.rs` verifies the signature **before parsing anything**, so no length or offset a hostile file declares is trusted before authentication. Each chunk must then pass both its GCM tag and its recorded plaintext hash: the nonce alone already binds a chunk to its ciphertext, and the hash binds it to its position.
 
   **Acceptance Criteria**:
-  - [ ] `DomeReader::open()` parses a valid .dome file
-  - [ ] `read_manifest()` returns decrypted manifest
-  - [ ] `read_chunk(n)` returns decrypted chunk n
-  - [ ] `verify_integrity()` passes for valid files, fails for tampered files
-  - [ ] Wrong key → specific error, not panic
+  - [x] `DomeReader::open()` parses a valid .dome file
+  - [x] `read_manifest()` returns decrypted manifest
+  - [x] `read_chunk(n)` returns decrypted chunk n
+  - [x] `verify_integrity()` passes for valid files, fails for tampered files
+  - [x] Wrong key → specific error, not panic (`wrong_key_fails_authentication`)
 
   **QA Scenarios**:
 
@@ -1472,11 +1483,11 @@ Max Concurrent: 6 (M1 wave)
   **Completed** (2026). `crates/dome-image/tests/m2_integration.rs` walks the real path: write a container, wrap its file key to an age recipient, then recover everything from the wrapped key alone. Includes the case where a key wrapped for someone else cannot open the file.
 
   **Acceptance Criteria**:
-  - [ ] All M2 tests pass
-  - [ ] `DomeWriter → DomeReader` round-trip works for all fixture combinations
-  - [ ] Tampered file detection works (integrity check fails)
-  - [ ] `dome foundation info <file>` CLI command works (header parsing only)
-  - [ ] No circular dependency between dome-crypto and dome-image
+  - [x] All M2 tests pass
+  - [x] `DomeWriter → DomeReader` round-trip works for all fixture combinations
+  - [x] Tampered file detection works (integrity check fails)
+  - [x] `dome foundation info <file>` CLI command works (header parsing only)
+  - [x] No circular dependency between dome-crypto and dome-image (`cargo tree` confirms 0)
 
   **QA Scenarios**:
 
@@ -1555,10 +1566,10 @@ Max Concurrent: 6 (M1 wave)
   - Root `Cargo.toml:28` — Current `unsafe_code = "forbid"`
 
   **Acceptance Criteria**:
-  - [ ] `cargo check -p dome-engine` compiles on Linux
-  - [ ] `cargo check -p dome-engine --target x86_64-unknown-linux-musl` compiles (musl target in toolchain)
-  - [ ] Workspace-level `unsafe_code = "forbid"` still applies to dome-core, dome-config, etc.
-  - [ ] `cargo check --workspace` loads the manifests successfully (guards the
+  - [x] `cargo check -p dome-engine` compiles on Linux
+  - [x] `cargo check -p dome-engine --target x86_64-unknown-linux-musl` compiles (musl target in toolchain)
+  - [x] Workspace-level `unsafe_code = "forbid"` still applies to dome-core, dome-config, etc.
+  - [x] `cargo check --workspace` loads the manifests successfully (guards the
         `[lints] workspace = true` conflict)
   - [ ] The commit message states whether `unsafe_code = "warn"` was actually needed
         in `dome-engine`, and if not, that the override was not added
@@ -1787,7 +1798,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] Guest serial output captured through a 16550 that reports readiness
   - [x] Guest memory mapped and proven zero-filled before first use
   - [x] Failure paths are typed errors, never panics
-  - [ ] Multi-vCPU threads (needs T22's launch ordering; single vCPU is enough for M3)
+  - [x] Multi-vCPU threads (needs T22's launch ordering; single vCPU is enough for M3)
 
 - [x] 20. **Engine Process Sandbox (seccomp + Landlock)**
 
@@ -2039,10 +2050,10 @@ Max Concurrent: 6 (M1 wave)
   - [x] Absence of a delegated subtree is a typed error, not a panic
 
   **Acceptance Criteria**:
-  - [ ] Chamber cgroup created with correct memory/CPU/PID limits
-  - [ ] `attach_process()` adds engine PID to cgroup
-  - [ ] `destroy()` removes cgroup after chamber stops
-  - [ ] Tests verify limits via reading cgroup files
+  - [x] Chamber cgroup created with correct memory/CPU/PID limits
+  - [x] `attach_process()` adds engine PID to cgroup
+  - [x] `destroy()` removes cgroup after chamber stops
+  - [x] Tests verify limits via reading cgroup files
 
   **QA Scenarios**:
 
@@ -2137,10 +2148,10 @@ Max Concurrent: 6 (M1 wave)
   > in-process; T24 is where it gets plugged into a live launch.
 
   **Acceptance Criteria**:
-  - [ ] Network namespace created with correct name
-  - [ ] Veth pair created and one end moved into namespace
-  - [ ] Port forwarding rules applied for each published port
-  - [ ] `destroy()` cleans up all networking resources
+  - [x] Network namespace created with correct name
+  - [x] Veth pair created and one end moved into namespace
+  - [x] Port forwarding rules applied for each published port
+  - [x] `destroy()` cleans up all networking resources
 
   **QA Scenarios**:
 
@@ -2210,10 +2221,10 @@ Max Concurrent: 6 (M1 wave)
   lifecycle, not the orchestrator.
 
   **Acceptance Criteria**:
-  - [ ] `create()` orchestrates engine + cgroup + netns
-  - [ ] Chamber registry correctly tracks chamber state
-  - [ ] Pipeline: .dome file → launch works end-to-end
-  - [ ] Error at any stage rolls back partial setup
+  - [x] `create()` orchestrates engine + cgroup + netns
+  - [x] Chamber registry correctly tracks chamber state
+  - [x] Pipeline: .dome file → launch works end-to-end
+  - [x] Error at any stage rolls back partial setup
 
   **QA Scenarios**:
 
@@ -2288,11 +2299,12 @@ Max Concurrent: 6 (M1 wave)
   - [x] Health rules match the documented behaviour, including the start-period rule
 
   **Acceptance Criteria**:
-  - [ ] `run()` starts VCPU loop in a tokio task
-  - [ ] `stop()` sends shutdown signal and cleans up resources
-  - [ ] Crash detection: engine exit → state = Failed
-  - [ ] Drop cleanup: no orphaned resources on supervisor exit
-  - [ ] CLI `run` and `stop` commands work
+  - [x] `run()` starts the VCPU loop — **synchronously**: T2 (tokio) was superseded, so the
+    criterion's mechanism changed while its requirement did not
+  - [x] `stop()` sends shutdown signal and cleans up resources
+  - [x] Crash detection: engine exit → state = Failed
+  - [x] Drop cleanup: no orphaned resources on supervisor exit
+  - [x] CLI `run` and `stop` commands work
 
   **QA Scenarios**:
 
@@ -2357,11 +2369,11 @@ Max Concurrent: 6 (M1 wave)
   > claims and whether this device can run it, and a tampered artifact is refused.
 
   **Acceptance Criteria**:
-  - [ ] `seal()` produces a valid `.seal.dome` file
-  - [ ] Sealed file contains guest memory snapshot
-  - [ ] Metadata includes chamber ID, timestamp
-  - [ ] `SECURITY.md` documents seal security model
-  - [ ] `dome seal` CLI command works
+  - [x] `seal()` produces a valid `.seal.dome` file
+  - [x] Sealed file contains guest memory snapshot
+  - [x] Metadata includes chamber ID, timestamp
+  - [x] `SECURITY.md` documents seal security model
+  - [x] `dome seal` CLI command works
 
   **QA Scenarios**:
 
@@ -2513,10 +2525,10 @@ Max Concurrent: 6 (M1 wave)
 
 
   **Acceptance Criteria**:
-  - [ ] All M4 tests pass
-  - [ ] Resource enforcement verified
-  - [ ] Port conflict detection verified
-  - [ ] Cleanup verified after normal and abnormal exit
+  - [x] All M4 tests pass
+  - [x] Resource enforcement verified
+  - [x] Port conflict detection verified
+  - [x] Cleanup verified after normal and abnormal exit
 
   **QA Scenarios**:
 
@@ -3654,8 +3666,8 @@ Max Concurrent: 6 (M1 wave)
   - [x] Chosen model verified on this host by probe, not assumed
   - [x] Rejected options recorded with reasons
   - [x] Isolation claims bounded explicitly, including the shared-UID trade
-  - [ ] `.rules/apertures.md` amended with the UID-sharing note (small follow-up, do with T38)
-  - [ ] `.rules/project.md` M4 privilege position recorded (do with the first M4 task)
+  - [x] `.rules/apertures.md` amended with the UID-sharing note (small follow-up, do with T38)
+  - [x] `.rules/project.md` M4 privilege position recorded (do with the first M4 task)
 
 - [x] 61. **CLI Contract Document (freeze the grammar before any command is written)**
 
@@ -3687,7 +3699,7 @@ Max Concurrent: 6 (M1 wave)
   - [x] `docs/cli-contract.md` covers every command referenced in this plan
   - [x] T5, T6, T29, T47 carry a grammar-authority pointer to it
   - [x] The rejected forms are recorded in the contract, not silently dropped
-  - [ ] `dome --version` and `dome doctor` report `schema_version` (implemented by T5)
+  - [x] `dome --version` and `dome doctor` report `schema_version` (implemented by T5)
 
 ---
 
@@ -3767,9 +3779,9 @@ Max Concurrent: 6 (M1 wave)
   > — not bytes per image.
 
   **Acceptance Criteria**:
-  - [ ] UART and initramfs writer pass unit tests with no hypervisor
-  - [ ] `docs/device-set.md` documents `DeviceSet`; T43–T46 reference it
-  - [ ] Kernel console output observed through the UART on a real boot (evidence file)
+  - [x] UART and initramfs writer pass unit tests with no hypervisor
+  - [x] `docs/device-set.md` documents `DeviceSet`; T43–T46 reference it
+  - [x] Kernel console output observed through the UART on a real boot (evidence file)
 
 ---
 
@@ -3826,9 +3838,9 @@ Max Concurrent: 6 (M1 wave)
   > travels with it, and deciding what is sensitive is not something the store can know.
 
   **Acceptance Criteria**:
-  - [ ] Two chambers from one foundation use one foundation's worth of disk
-  - [ ] Overlay writes never mutate the shared foundation (digest stability test)
-  - [ ] `prune` leaves referenced foundations intact
+  - [x] Two chambers from one foundation use one foundation's worth of disk
+  - [x] Overlay writes never mutate the shared foundation (digest stability test)
+  - [x] `prune` leaves referenced foundations intact
 
 ---
 
@@ -3972,10 +3984,15 @@ Max Concurrent: 6 (M1 wave)
 
   **Acceptance Criteria**:
   - [ ] Vectors from the specifications pass
-  - [ ] Suite-2 container round-trips with a payload spanning several chunks
-  - [ ] A suite-1 reader refuses a suite-2 file with `UnsupportedSuite`
-  - [ ] Dual signatures: a file with one forged signature is rejected
-  - [ ] No `SIGNATURE_LEN` constant is used to locate the footer
+    — **not done.** aws-lc-rs is FIPS-validated for the primitives themselves, so ML-KEM-768
+    and ML-DSA-65 are covered upstream; what has no known-answer test is *our composition*:
+    the RFC 10024 concatenation order and the HKDF schedule. The round-trip tests would pass
+    even if the order were reversed on both sides, which is exactly the bug a vector would
+    catch. Tracked rather than ticked.
+  - [x] Suite-2 container round-trips with a payload spanning several chunks
+  - [x] A suite-1 reader refuses a suite-2 file with `UnsupportedSuite`
+  - [x] Dual signatures: a file with one forged signature is rejected
+  - [x] No `SIGNATURE_LEN` constant is used to locate the footer
 
 ---
 
