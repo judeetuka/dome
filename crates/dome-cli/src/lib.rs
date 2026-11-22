@@ -6,6 +6,7 @@ use dome_config::Blueprint;
 use dome_host_linux::{HostReport, ProbeRoot};
 
 pub mod chambers;
+pub mod packaging;
 pub mod release;
 
 /// Dome command-line entry point.
@@ -144,6 +145,32 @@ enum Commands {
         /// Directory to write the keys into
         #[arg(long, value_name = "DIR", required = true)]
         out: PathBuf,
+    },
+
+    /// Package a release as a self-contained export
+    Export {
+        /// The artifact to package
+        #[arg(value_name = "ARTIFACT")]
+        artifact: PathBuf,
+        /// Key directory that can open it
+        #[arg(long, value_name = "DIR")]
+        keys: PathBuf,
+        /// Where to write the package
+        #[arg(long, value_name = "PATH", required = true)]
+        output: PathBuf,
+    },
+
+    /// Unpack an export into a usable artifact
+    Import {
+        /// The package to unpack
+        #[arg(value_name = "PACKAGE")]
+        package: PathBuf,
+        /// Key directory that can open it
+        #[arg(long, value_name = "DIR")]
+        keys: PathBuf,
+        /// Where to write the artifact
+        #[arg(long, value_name = "PATH", required = true)]
+        output: PathBuf,
     },
 
     /// Verify a release and report whether this device can run it
@@ -414,6 +441,20 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
                 files.mldsa.display()
             ))
         }
+
+        Commands::Export {
+            artifact,
+            keys,
+            output,
+        } => packaging::export(&artifact, &release::KeyFiles::in_dir(&keys), &output)
+            .map_err(CliError::Failed),
+
+        Commands::Import {
+            package,
+            keys,
+            output,
+        } => packaging::import(&package, &release::KeyFiles::in_dir(&keys), &output)
+            .map_err(CliError::Failed),
 
         Commands::Inspect { artifact, keys } => {
             release::inspect(&artifact, &release::KeyFiles::in_dir(&keys)).map_err(CliError::Failed)

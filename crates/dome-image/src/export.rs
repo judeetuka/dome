@@ -22,8 +22,14 @@ pub const SECTION_FORMAT: &str = "format";
 pub const SECTION_CELL: &str = "cell";
 /// The foundation name the chamber was built from.
 pub const SECTION_FOUNDATION: &str = "foundation";
-/// The chamber's seal, as a complete `.seal.dome` container.
+/// The chamber's seal, as a complete container.
 pub const SECTION_SEAL: &str = "seal";
+/// The wrapped file key that opens that seal.
+///
+/// Carried so an export is importable on its own: the seal is encrypted with its own file key,
+/// and that key is already wrapped to the recipient, so shipping it inside the package adds no
+/// new exposure while making the round trip work without the original machine.
+pub const SECTION_KEY: &str = "wrapped-key";
 /// The console log.
 pub const SECTION_LOGS: &str = "logs";
 /// Creation time, in seconds since the Unix epoch.
@@ -107,6 +113,7 @@ impl Export {
         Self::with_meta(
             cell_toml,
             seal,
+            None,
             logs,
             ExportMeta::new(foundation, created_unix),
         )
@@ -120,6 +127,7 @@ impl Export {
     pub fn with_meta(
         cell_toml: &str,
         seal: Option<Vec<u8>>,
+        wrapped_key: Option<Vec<u8>>,
         logs: &str,
         meta: ExportMeta,
     ) -> Result<Self, ImageError> {
@@ -171,8 +179,19 @@ impl Export {
         bundle.set_text(SECTION_CREATED, &meta.created_unix.to_string())?;
         bundle.set_text(SECTION_LOGS, logs)?;
 
-        if let Some(seal) = seal {
-            bundle.set(SECTION_SEAL, seal)?;
+        match (seal, wrapped_key) {
+            (Some(seal), key) => {
+                bundle.set(SECTION_SEAL, seal)?;
+                if let Some(key) = key {
+                    bundle.set(SECTION_KEY, key)?;
+                }
+            }
+            (None, Some(_)) => {
+                return Err(ImageError::Manifest(
+                    "a wrapped key was given without the seal it opens".to_owned(),
+                ));
+            }
+            (None, None) => {}
         }
 
         Ok(Self { bundle })
@@ -196,6 +215,11 @@ impl Export {
     /// The embedded seal, as a complete container.
     pub fn seal(&self) -> Option<&[u8]> {
         self.bundle.section(SECTION_SEAL)
+    }
+
+    /// The wrapped file key that opens the embedded seal.
+    pub fn wrapped_key(&self) -> Option<&[u8]> {
+        self.bundle.section(SECTION_KEY)
     }
 
     /// The protection tier the package records.

@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 361 tests passing, `cargo fmt --check`, `cargo check`,
+**Verified state of the tree**: 366 tests passing, `cargo fmt --check`, `cargo check`,
 `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings` all clean.
 Evidence for every completed task is committed under `evidence/`.
 
@@ -430,7 +430,7 @@ Wave M4 (Chamber Lifecycle — 7 tasks, 4 parallel):
 ├── T24: Chamber create orchestrator [DONE]
 ├── T25: Chamber run/stop lifecycle [DONE]
 ├── T26: Chamber seal (save to .seal.dome) [DONE]
-├── T27: Chamber export [DONE — package format; export/import verbs owed]
+├── T27: Chamber export [DONE]
 ├── T28: M4 integration tests (enforcement, conflict, cleanup) [DONE — release loop + chamber lifecycle]
 ├── T63: Virtio substrate (UART + virtio-mmio + initramfs path) [DONE]
 ├── T64: Content-addressed foundation store + CoW overlays [DONE — M4 COMPLETE]
@@ -2381,7 +2381,7 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 27. **Chamber Export**
+- [x] 27. **Chamber Export**
 
   **What to do**:
   - Implement `ChamberOrchestrator::export()`:
@@ -2421,10 +2421,21 @@ Max Concurrent: 6 (M1 wave)
   > together with `dome seal`, is the point at which the CLI can do the whole cycle with one
   > key story rather than two.
 
+  > **Done.** `dome export` and `dome import` close the last open M4 task.
+  >
+  > The package carries the seal **and** the wrapped key that opens it. Without the key an
+  > export could only ever be imported on the machine that produced it, which defeats the whole
+  > point; the key is already wrapped to the recipient's age identity, so carrying it adds no
+  > exposure. A key without a seal is refused as a manifest mistake.
+  >
+  > Three tests, one of which is a real round trip: boot a kernel, release it, export it, import
+  > it into a fresh artifact, and confirm the imported copy claims the same distribution and
+  > chamber as the original. That test skips without KVM rather than pretending.
+
   **Acceptance Criteria**:
-  - [ ] `export()` produces valid .dome export file
-  - [ ] Export contains cell blueprint + foundation ref + seal data
-  - [ ] `dome export` CLI command works
+  - [x] `export()` produces a valid .dome export file
+  - [x] Export contains the cell blueprint, the foundation reference and the seal data
+  - [x] `dome export` works, and `dome import` restores a usable artifact
 
   **QA Scenarios**:
 

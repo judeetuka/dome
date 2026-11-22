@@ -1,0 +1,9 @@
+# T27 - export and import verbs
+# command: cargo test -p dome-cli --test export_import -j4
+
+a_package_round_trips_into_a_usable_artifact ... ok   (boots a kernel, 8.3s)
+exporting_without_the_artifact_fails_clearly ... ok
+importing_something_that_is_not_a_package_fails ... ok
+
+# dome export app.dome --keys keys --output app.export.dome
+# dome import app.export.dome --keys keys --output restored.dome

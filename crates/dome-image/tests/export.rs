@@ -109,6 +109,7 @@ fn a_seal_travels_inside_an_export_unchanged() {
     let export = Export::with_meta(
         CELL,
         Some(seal_bytes.clone()),
+        None,
         "log",
         ExportMeta::new("dome/alpine:3.20", 1).with_seal_protection(HostProtection::UNPROTECTED),
     )
@@ -219,6 +220,7 @@ fn an_export_refuses_a_host_that_cannot_meet_the_policy() {
     let error = Export::with_meta(
         CELL,
         None,
+        None,
         "",
         Meta::new("dome/alpine:3.20", 0).requiring_confidentiality(),
     )
@@ -234,6 +236,7 @@ fn an_export_refuses_to_understate_a_confidential_seal() {
     let error = Export::with_meta(
         CELL,
         Some(vec![1, 2, 3]),
+        None,
         "",
         Meta::new("dome/alpine:3.20", 0).with_seal_protection(HostProtection::confidential(
             dome_image::tier::ConfidentialMechanism::Tdx,
@@ -249,6 +252,7 @@ fn a_packaged_seal_must_declare_its_tier() {
     let error = Export::with_meta(
         CELL,
         Some(vec![1, 2, 3]),
+        None,
         "",
         Meta::new("dome/alpine:3.20", 0),
     )
@@ -262,6 +266,7 @@ fn an_export_records_its_own_tier() {
     let keys = keys();
     let export = Export::with_meta(
         CELL,
+        None,
         None,
         "",
         Meta::new("dome/alpine:3.20", 7)
@@ -284,4 +289,37 @@ fn an_export_records_its_own_tier() {
 
     assert!(recovered.protection().expect("tier").is_confidential());
     assert!(!recovered.is_degraded());
+}
+
+#[test]
+fn the_key_that_opens_the_seal_travels_with_it() {
+    let keys = keys();
+    let export = Export::with_meta(
+        CELL,
+        Some(vec![1, 2, 3]),
+        Some(vec![9, 9, 9]),
+        "",
+        Meta::new("dome/alpine:3.20", 0).with_seal_protection(HostProtection::UNPROTECTED),
+    )
+    .expect("export");
+
+    let bytes = write_export(
+        &export,
+        &manifest("/tmp/base.img"),
+        &keys.file,
+        &keys.ed,
+        &keys.ml,
+    )
+    .expect("write");
+    let (recovered, _) = read_export(&bytes, &keys.file, hybrid(&keys)).expect("read");
+
+    // Without this an export could not be imported anywhere but the machine that made it.
+    assert_eq!(recovered.seal(), Some([1u8, 2, 3].as_slice()));
+    assert_eq!(recovered.wrapped_key(), Some([9u8, 9, 9].as_slice()));
+}
+
+#[test]
+fn a_key_without_a_seal_is_refused() {
+    let error = Export::with_meta(CELL, None, Some(vec![1]), "", Meta::new("x", 0)).unwrap_err();
+    assert!(error.to_string().contains("without the seal"), "{error}");
 }

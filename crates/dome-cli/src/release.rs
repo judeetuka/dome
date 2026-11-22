@@ -110,7 +110,8 @@ impl KeyFiles {
         Ok(())
     }
 
-    fn load(&self) -> Result<LoadedKeys, String> {
+    /// Read every key file. Used by packaging as well as by release.
+    pub fn load(&self) -> Result<LoadedKeys, String> {
         let identity_text = read(&self.identity)?;
         let recipient_text = read(&self.recipient)?;
         let identity =
@@ -141,13 +142,20 @@ impl KeyFiles {
     }
 }
 
-struct LoadedKeys {
-    identity: age::x25519::Identity,
-    recipient: age::x25519::Recipient,
-    signing: dome_crypto::Ed25519KeyPair,
-    mldsa: dome_crypto::pq::PqdsaKeyPair,
-    signing_public: Vec<u8>,
-    mldsa_public: Vec<u8>,
+/// Everything a release needs, once read from disk.
+pub struct LoadedKeys {
+    /// age identity, for unwrapping file keys.
+    pub identity: age::x25519::Identity,
+    /// age recipient, for wrapping them.
+    pub recipient: age::x25519::Recipient,
+    /// Ed25519 signing key.
+    pub signing: dome_crypto::Ed25519KeyPair,
+    /// ML-DSA signing key.
+    pub mldsa: dome_crypto::pq::PqdsaKeyPair,
+    /// Ed25519 public key.
+    pub signing_public: Vec<u8>,
+    /// ML-DSA public key.
+    pub mldsa_public: Vec<u8>,
 }
 
 /// Everything needed to produce a release.
