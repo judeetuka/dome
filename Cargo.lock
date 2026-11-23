@@ -586,6 +586,7 @@ name = "dome-supervisor"
 version = "0.1.0"
 dependencies = [
  "dome-core",
+ "dome-engine",
  "dome-net",
  "libc",
  "thiserror 2.0.21",

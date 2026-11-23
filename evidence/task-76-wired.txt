@@ -1,0 +1,13 @@
+# the device wired into the engine, and a request that completes
+# command: cargo test -p dome-engine --test chamber_devices -p dome-supervisor --lib
+
+a_chamber_gets_a_console_and_a_network_device ... ok
+the_network_device_answers_the_probe_a_kernel_makes ... ok
+a_chamber_without_a_network_keeps_the_console_only ... ok
+the_transport_can_be_built_directly_for_a_test ... ok
+
+user_net::bridge_tests::a_request_leaves_and_the_answer_comes_back ... ok
+user_net::bridge_tests::an_isolated_backend_refuses_the_handshake ... ok
+
+# the round trip uses a real TcpListener: guest frame in, SYN-ACK out, request in,
+# response bytes out as a PSH|ACK segment the guest can accept.

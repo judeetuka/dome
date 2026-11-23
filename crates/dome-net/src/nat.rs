@@ -83,7 +83,17 @@ pub enum Disposition {
 pub struct UserNet<R: TcpRelay, D: DnsResolver> {
     relay: R,
     resolver: D,
-    flows: HashMap<Flow, bool>,
+    flows: HashMap<Flow, FlowState>,
+}
+
+/// What the engine remembers about a flow.
+#[derive(Debug, Clone, Copy)]
+struct FlowState {
+    /// The sequence number the next guest-bound segment will carry.
+    ///
+    /// The engine numbers its own direction. The guest's numbers never leave this process and the
+    /// remote host's never enter it, which is what makes the translation a border.
+    next_sequence: u32,
 }
 
 impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
@@ -254,7 +264,7 @@ impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
                 return Disposition::Reply(vec![self.tcp_reset(&flow, &segment)]);
             }
 
-            self.flows.insert(flow, true);
+            self.flows.insert(flow, FlowState { next_sequence: 2 });
 
             let acknowledgement = segment.sequence.wrapping_add(1);
             let syn_ack = TcpSegment {
@@ -276,9 +286,8 @@ impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
             )]);
         }
 
-        match self.flows.get(&flow).copied() {
-            Some(true) => {}
-            _ => return Disposition::Drop,
+        if !self.flows.contains_key(&flow) {
+            return Disposition::Drop;
         }
 
         if !segment.payload.is_empty() {
@@ -291,6 +300,50 @@ impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
         }
 
         Disposition::Drop
+    }
+
+    /// Frames waiting to go back to the guest.
+    ///
+    /// Called when the engine has nothing else to do. Each open flow is polled, and any bytes that
+    /// arrived are framed as a segment the guest will accept: the sequence number continues from
+    /// the one this side advertised during the handshake.
+    pub fn poll(&mut self) -> Vec<Vec<u8>> {
+        let flows: Vec<Flow> = self.flows.keys().copied().collect();
+        let mut frames = Vec::new();
+
+        for flow in flows {
+            let Some(data) = self.relay.poll(flow) else {
+                continue;
+            };
+
+            if data.is_empty() {
+                continue;
+            }
+
+            let Some(state) = self.flows.get_mut(&flow) else {
+                continue;
+            };
+
+            let segment = TcpSegment {
+                source_port: flow.remote_port,
+                destination_port: flow.guest_port,
+                sequence: state.next_sequence,
+                acknowledgement: 0,
+                flags: tcp_flags::ACK | tcp_flags::PSH,
+                window: 65535,
+                payload: data.clone(),
+            };
+
+            // The guest's own numbering is not tracked, so the acknowledgement repeats the last
+            // value it saw. A guest that insists on exact acknowledgement accounting would need
+            // this to be a real counter, which is noted in T76 rather than guessed at.
+            state.next_sequence = state.next_sequence.wrapping_add(data.len() as u32);
+
+            let bytes = segment.to_bytes(flow.remote_address, GUEST_ADDRESS);
+            frames.push(self.to_guest(GUEST_ADDRESS, flow.remote_address, PROTOCOL_TCP, bytes));
+        }
+
+        frames
     }
 
     /// A reset for a connection that will not be opened.

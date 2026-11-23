@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 419 tests passing
+**Verified state of the tree**: 425 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4114,9 +4114,13 @@ Max Concurrent: 6 (M1 wave)
   >    status in config space, no offload features, and every guest length treated as a claim
   > 3. ~~user-mode NAT~~ - **done**: protocol logic in dome-net::nat (ARP, ICMP echo, DNS, TCP
   >    flows) plus the socket side in dome-supervisor::user_net (SocketRelay, SystemResolver),
-  >    tested against a real local listener and a real UDP nameserver. Remaining: wiring the
-  >    device into ChamberIo and the launch loop, and the guest-side addressing.
-  > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP
+  >    tested against a real local listener and a real UDP nameserver. The device is wired:
+  >    ChamberIo::with_console_and_network plus LinuxEngine::launch_with, and UserNetBackend
+  >    carries frames both ways. A request leaves and the answer comes back, over a real server.
+  >    Remaining: the guest-side addressing, and a real kernel behind it.
+  > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP.
+  >    Needs either a kernel built with CONFIG_IP_PNP (the ip= parameter) or dome-init configuring
+  >    the interface itself.
   > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool
   >
   > **Must NOT do**:

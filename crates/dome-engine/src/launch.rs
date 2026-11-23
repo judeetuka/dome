@@ -122,6 +122,19 @@ impl LinuxEngine {
     /// This is a synchronous path with a wall-clock limit, not a chamber lifecycle: it
     /// exists so the pieces can be proven to work together before M4 adds scheduling.
     pub fn launch(&self, request: &LaunchRequest) -> Result<BootOutcome, EngineError> {
+        self.launch_with(request, ChamberIo::with_console())
+    }
+
+    /// Boot a kernel with a device set the caller chose.
+    ///
+    /// The device set is a parameter rather than a field on the request because a device holds
+    /// state the engine does not own: a network backend outlives one boot and a test needs to
+    /// inspect it afterwards.
+    pub fn launch_with(
+        &self,
+        request: &LaunchRequest,
+        mut io: ChamberIo,
+    ) -> Result<BootOutcome, EngineError> {
         let vm = self
             .kvm()
             .create_vm()
@@ -206,7 +219,6 @@ impl LinuxEngine {
 
         // One object for both paths: a legacy port write and a memory-mapped write reach the
         // same devices, so the console cannot disagree with itself.
-        let mut io = ChamberIo::with_console();
         let mut exits = 0u64;
         let mut stopped = false;
         let mut timed_out = false;

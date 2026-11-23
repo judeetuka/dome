@@ -12,6 +12,7 @@ pub mod uart16550;
 pub mod virtio_mmio;
 pub mod virtio_net;
 
+use crate::devices::virtio_net::NetworkBackend;
 use crate::memory::GuestMemory;
 
 /// One device the guest can reach.
@@ -246,6 +247,21 @@ impl ChamberIo {
     pub fn with_console() -> Self {
         let mut devices = DeviceSet::new();
         devices.add(Box::new(uart16550::Uart16550::new()));
+        Self { devices }
+    }
+
+    /// A chamber with a console and a network device.
+    ///
+    /// The network is attached at the standard virtio-mmio window, so the guest finds it the same
+    /// way it finds any other virtio device. A chamber built this way is still three-device-shaped
+    /// from the engine's point of view: console, transport, and whatever the transport carries.
+    pub fn with_console_and_network(backend: impl NetworkBackend + 'static) -> Self {
+        let mut devices = DeviceSet::new();
+        devices.add(Box::new(uart16550::Uart16550::new()));
+        devices.add(Box::new(virtio_mmio::VirtioMmio::new(
+            VIRTIO_MMIO_BASE,
+            virtio_net::VirtioNet::new(backend),
+        )));
         Self { devices }
     }
 

@@ -13,6 +13,9 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpStream, UdpSocket};
 use std::time::Duration;
 
+use std::collections::VecDeque;
+
+use dome_engine::devices::virtio_net::NetworkBackend;
 use dome_net::nat::{DnsResolver, Flow, TcpRelay};
 
 /// How long a DNS query may take before it is abandoned.
@@ -166,6 +169,61 @@ impl DnsResolver for SystemResolver {
     }
 }
 
+/// The user-mode network as a device backend.
+///
+/// The device moves frames; this decides what they mean. One direction is synchronous (a request
+/// that can be answered from the frame alone: ARP, ICMP, DNS, a handshake). The other arrives
+/// later, which is why receive polls the flows rather than waiting for a frame to trigger it.
+pub struct UserNetBackend {
+    net: dome_net::nat::UserNet<SocketRelay, SystemResolver>,
+    outbox: VecDeque<Vec<u8>>,
+}
+
+impl UserNetBackend {
+    /// A backend with the given perimeter.
+    pub fn new(relay: SocketRelay) -> Self {
+        Self {
+            net: dome_net::nat::UserNet::new(relay, SystemResolver::from_host()),
+            outbox: VecDeque::new(),
+        }
+    }
+
+    /// A backend with a resolver of the caller's choosing, for tests.
+    pub fn with_resolver(relay: SocketRelay, resolver: SystemResolver) -> Self {
+        Self {
+            net: dome_net::nat::UserNet::new(relay, resolver),
+            outbox: VecDeque::new(),
+        }
+    }
+
+    /// How many flows the guest has open.
+    pub fn open_flows(&self) -> usize {
+        self.net.open_flows()
+    }
+}
+
+impl NetworkBackend for UserNetBackend {
+    fn mac(&self) -> [u8; 6] {
+        dome_net::nat::GUEST_MAC.0
+    }
+
+    fn transmit(&mut self, frame: &[u8]) {
+        if let dome_net::nat::Disposition::Reply(frames) = self.net.handle(frame) {
+            self.outbox.extend(frames);
+        }
+    }
+
+    fn receive(&mut self) -> Option<Vec<u8>> {
+        if let Some(frame) = self.outbox.pop_front() {
+            return Some(frame);
+        }
+
+        // Nothing queued: ask the flows whether anything arrived while we were idle.
+        self.outbox.extend(self.net.poll());
+        self.outbox.pop_front()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +297,114 @@ mod tests {
         );
 
         server.join().expect("server");
+    }
+}
+
+#[cfg(test)]
+mod bridge_tests {
+    use super::*;
+    use dome_net::packets::{
+        ETHERTYPE_IPV4, EthernetFrame, Ipv4Address, Ipv4Packet, PROTOCOL_TCP, TcpSegment, tcp_flags,
+    };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    const REMOTE: Ipv4Address = Ipv4Address([127, 0, 0, 1]);
+
+    fn frame(packet: Ipv4Packet) -> Vec<u8> {
+        EthernetFrame {
+            destination: dome_net::nat::GATEWAY_MAC,
+            source: dome_net::nat::GUEST_MAC,
+            ethertype: ETHERTYPE_IPV4,
+            payload: packet.to_bytes(),
+        }
+        .to_bytes()
+    }
+
+    fn tcp(port: u16, flags: u8, sequence: u32, payload: &[u8]) -> Vec<u8> {
+        let segment = TcpSegment {
+            source_port: 40000,
+            destination_port: port,
+            sequence,
+            acknowledgement: 0,
+            flags,
+            window: 64240,
+            payload: payload.to_vec(),
+        };
+
+        frame(Ipv4Packet {
+            source: dome_net::nat::GUEST_ADDRESS,
+            destination: REMOTE,
+            protocol: PROTOCOL_TCP,
+            ttl: 64,
+            identification: 0,
+            dont_fragment: true,
+            payload: segment.to_bytes(dome_net::nat::GUEST_ADDRESS, REMOTE),
+        })
+    }
+
+    #[test]
+    fn a_request_leaves_and_the_answer_comes_back() {
+        // A real server, so the test covers the socket path as well as the framing.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+        let port = listener.local_addr().expect("address").port();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut request = [0u8; 5];
+            stream.read_exact(&mut request).expect("request");
+            assert_eq!(&request, b"GET /");
+            stream
+                .write_all(b"hello from the server")
+                .expect("response");
+            std::thread::sleep(Duration::from_millis(200));
+        });
+
+        let mut backend = UserNetBackend::new(SocketRelay::permitting());
+
+        // Handshake, then the request.
+        backend.transmit(&tcp(port, tcp_flags::SYN, 1, b""));
+        let syn_ack = backend.receive().expect("the handshake is answered");
+        let reply = EthernetFrame::parse(&syn_ack).expect("frame");
+        let packet = Ipv4Packet::parse(&reply.payload).expect("packet");
+        let segment = TcpSegment::parse(&packet.payload).expect("tcp");
+        assert_eq!(segment.flags, tcp_flags::SYN | tcp_flags::ACK);
+
+        backend.transmit(&tcp(port, tcp_flags::ACK, 2, b"GET /"));
+        assert_eq!(backend.open_flows(), 1);
+
+        // The answer arrives later, so it comes out of receive rather than out of the transmit
+        // that caused it.
+        let mut answer = None;
+        for _ in 0..200 {
+            if let Some(frame) = backend.receive() {
+                let parsed = EthernetFrame::parse(&frame).expect("frame");
+                let packet = Ipv4Packet::parse(&parsed.payload).expect("packet");
+                let segment = TcpSegment::parse(&packet.payload).expect("tcp");
+                if !segment.payload.is_empty() {
+                    answer = Some(segment.payload);
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(answer.as_deref(), Some(&b"hello from the server"[..]));
+        server.join().expect("server");
+    }
+
+    #[test]
+    fn an_isolated_backend_refuses_the_handshake() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+        let port = listener.local_addr().expect("address").port();
+
+        let mut backend = UserNetBackend::new(SocketRelay::isolated());
+        backend.transmit(&tcp(port, tcp_flags::SYN, 1, b""));
+
+        let frame = backend.receive().expect("a refusal is answered");
+        let parsed = EthernetFrame::parse(&frame).expect("frame");
+        let packet = Ipv4Packet::parse(&parsed.payload).expect("packet");
+        let segment = TcpSegment::parse(&packet.payload).expect("tcp");
+        assert_eq!(segment.flags & tcp_flags::RST, tcp_flags::RST);
     }
 }

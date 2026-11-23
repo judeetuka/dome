@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 dome-core = { path = "../dome-core" }
 dome-net = { path = "../dome-net" }
+dome-engine = { path = "../dome-engine" }
 thiserror.workspace = true
 libc = "0.2"
 
