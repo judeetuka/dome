@@ -10,6 +10,7 @@
 
 pub mod uart16550;
 pub mod virtio_mmio;
+pub mod virtio_net;
 
 use crate::memory::GuestMemory;
 

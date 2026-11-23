@@ -1,0 +1,14 @@
+# the network device, driven the way a guest drives it
+# command: cargo test -p dome-engine --test net -j4
+
+a_guest_frame_reaches_the_network ... ok
+a_frame_from_the_network_lands_in_the_guest_buffer ... ok
+a_frame_larger_than_the_offered_buffer_is_not_written ... ok
+the_device_announces_its_mac_and_link_state ... ok
+an_unknown_queue_is_not_claimed ... ok
+a_chain_longer_than_the_table_is_not_followed ... ok
+a_ready_queue_is_required_before_the_device_touches_memory ... ok
+the_transport_routes_a_doorbell_to_the_network_device ... ok
+
+# deliberately not offered: checksum offload, segmentation offload, merged buffers.
+# every offload not offered is a parser not written.

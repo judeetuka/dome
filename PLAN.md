@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 401 tests passing
+**Verified state of the tree**: 409 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4063,7 +4063,8 @@ Max Concurrent: 6 (M1 wave)
   > permanent memory reference would alias the engine's mapping, which is the bug this avoids.
   > Tested with a backend that walks a descriptor chain and reads the buffer it points at.
   >
-  > 2. a virtio-net device: two queues, a MAC in config space, the feature bits the kernel wants
+  > 2. ~~a virtio-net device~~ - **done**: queue 0 receives, queue 1 transmits, MAC and link
+  >    status in config space, no offload features, and every guest length treated as a claim
   > 3. user-mode NAT: answer ARP, echo ICMP, proxy DNS, and relay TCP through host sockets
   > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP
   > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool
