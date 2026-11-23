@@ -17,6 +17,10 @@ const EMBEDDED_WORKLOAD: &str = "/workload";
 fn main() {
     mount_devtmpfs();
 
+    // Anything the image needs to install for itself happens first: the installers are shell
+    // scripts, so the shell has to be part of the image for this to be possible at all.
+    run_bootstrap();
+
     // The kernel starts init with no arguments, so an embedded program is found by convention.
     let workload = std::env::args().nth(1).or_else(|| {
         Path::new(EMBEDDED_WORKLOAD)
@@ -90,6 +94,66 @@ fn mount_devtmpfs() {
             std::ptr::null(),
         )
     };
+}
+
+/// Install what the image records in /etc/dome/bootstrap.
+///
+/// The host is not involved: the chamber fetches each manager with its own static fetcher and
+/// runs the result with its own shell.
+fn run_bootstrap() {
+    let Ok(manifest) = std::fs::read_to_string("/etc/dome/bootstrap") else {
+        return;
+    };
+
+    let mut url: Option<String> = None;
+    for line in manifest.lines() {
+        match line.split_once('=') {
+            Some(("url", value)) => url = Some(value.to_owned()),
+            Some(("manager", name)) => {
+                say(&format!("dome-init: installing {name}"));
+            }
+            _ => {}
+        }
+    }
+
+    let Some(url) = url else {
+        say("dome-init: no installer URL recorded; nothing to install");
+        return;
+    };
+
+    say(&format!("dome-init: fetching {url}"));
+
+    let fetched = std::process::Command::new("/usr/bin/dome-fetch")
+        .arg(&url)
+        .arg("/run/installer")
+        .status();
+
+    match fetched {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            say(&format!(
+                "dome-init: fetching the installer failed: {status}"
+            ));
+            return;
+        }
+        Err(error) => {
+            say(&format!(
+                "dome-init: cannot run /usr/bin/dome-fetch: {error}"
+            ));
+            return;
+        }
+    }
+
+    // The installer is a shell script, so it runs with the shell that is part of the image.
+    match std::process::Command::new("/bin/sh")
+        .arg("/run/installer")
+        .status()
+    {
+        Ok(status) => say(&format!("dome-init: installer finished: {status}")),
+        Err(error) => say(&format!("dome-init: cannot run /bin/sh: {error}")),
+    }
+
+    let _ = std::fs::remove_file("/etc/dome/bootstrap");
 }
 
 /// Write a line where a boot observer will see it.

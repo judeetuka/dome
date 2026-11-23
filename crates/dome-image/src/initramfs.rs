@@ -51,6 +51,23 @@ impl Entry {
         }
     }
 
+    /// A symbolic link, which is how one binary answers to several names (/bin/sh -> bash).
+    ///
+    /// In a cpio archive the link target is the entry's data and the mode carries S_IFLNK. A
+    /// builder that modelled this as a copy would either double the image or ship a stale binary.
+    pub fn symlink(path: &str, target: &str) -> Self {
+        Self {
+            path: path.to_owned(),
+            data: target.as_bytes().to_vec(),
+            mode: 0o120_777,
+        }
+    }
+
+    /// Whether this entry is a link.
+    pub fn is_symlink(&self) -> bool {
+        self.mode & 0o170_000 == 0o120_000
+    }
+
     /// A directory.
     pub fn directory(path: &str) -> Self {
         Self {

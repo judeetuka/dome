@@ -41,6 +41,8 @@ pub struct BuildOptions {
     pub workload: Option<PathBuf>,
     /// A statically linked fetcher, which is how the chamber reaches the network itself.
     pub fetcher: Option<PathBuf>,
+    /// Where shell profiles live. Overridable so tests do not touch the real store.
+    pub shell_root: PathBuf,
 }
 
 /// Build a foundation directory and report what it contains.
@@ -113,6 +115,42 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     image
         .add(Entry::executable("init", init_bytes))
         .map_err(|error| error.to_string())?;
+
+    // A chamber that installs packages needs a shell first, because installers are scripts. The
+    // shell is resolved from a profile, exactly like the kernel, so no path is ever passed in.
+    if let Some(shell) = recipe.shell.as_ref() {
+        let profile = if shell.default.trim().is_empty() {
+            "bash"
+        } else {
+            shell.default.as_str()
+        };
+
+        let binary = crate::shell::resolve(&options.shell_root, profile)?;
+        let bytes = fs::read(&binary)
+            .map_err(|error| format!("cannot read the shell {}: {error}", binary.display()))?;
+
+        if !dome_config::installer::is_static_elf(&bytes).map_err(|error| error.to_string())? {
+            return Err(format!(
+                "the shell at {} is dynamically linked; it must be static or the image would \
+                 depend on the host's C library",
+                binary.display()
+            ));
+        }
+
+        let name = format!("bin/{}", profile.rsplit('/').next().unwrap_or(profile));
+        image
+            .add(Entry::executable(&name, bytes.clone()))
+            .map_err(|error| error.to_string())?;
+
+        // /bin/sh always exists: scripts say #!/bin/sh, and a shell that is present but unnamed is
+        // a shell no script can find.
+        let target = name.trim_start_matches("bin/");
+        if target != "sh" {
+            image
+                .add(Entry::symlink("bin/sh", target))
+                .map_err(|error| error.to_string())?;
+        }
+    }
 
     if let Some((_, bytes)) = bootstrap.as_ref() {
         image

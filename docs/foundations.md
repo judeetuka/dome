@@ -115,6 +115,37 @@ official Arch repositories** (checked with `pacman -Si` on this host). Choosing 
 or building it, which the builder must be able to do. systemd is in every repository and costs
 about 45 MiB.
 
+### A shell, because installers are scripts
+
+`mise.run` returns a shell script. That makes "install the package manager" circular unless the
+image already has a shell, so a foundation that installs packages carries one:
+
+```
+dome shell import --profile bash --from <static bash>   # once, into a profile store
+```
+
+Measured on this host, both built from source with `musl-gcc` and no distribution:
+
+| Shell | Size | Notes |
+| --- | --- | --- |
+| **bash 5.2.37** | **1.32 MB** | `--without-bash-malloc`, needs `-std=gnu89` on GCC 16 |
+| busybox 1.36.1 `ash` | 2.53 MB | defconfig; brings applets a foundation should not have |
+
+Bash is the default because the installers are written for it. Only a **static** shell is accepted:
+a dynamic one would need the host's C library inside the chamber, which is the dependency that makes
+an image host-specific. The image gets `/bin/bash` and `/bin/sh` as a symlink, because a shell
+that is present but unnamed is a shell no script can find.
+
+The boot order that follows:
+
+1. `dome-init` mounts `/dev` and `/proc`
+2. if `/etc/dome/bootstrap` exists, it fetches each manager with the image's own static fetcher
+3. it runs that installer with `/bin/sh`
+4. then it execs the workload, or stays alive
+
+The host contributes the kernel, the init, the shell and the fetcher - all static, all resolved from
+profiles. It contributes no packages, no toolchain, and no libraries.
+
 ### The kernel comes from a profile, not from the command line
 
 A user names a profile; the profile resolves to an image on this host. Nobody passes a kernel

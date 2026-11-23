@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 381 tests passing
+**Verified state of the tree**: 391 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4039,6 +4039,21 @@ Max Concurrent: 6 (M1 wave)
   - [x] A corrupt record does not hide the valid ones
   - [x] Reconciliation resumes what was running and nothing else
   - [x] The record cannot escape its directory
+
+---
+
+- [ ] 75. **Chamber Test Flake Under Parallel Runs**
+
+  > `starting_a_chamber_twice_is_refused_while_it_runs` failed once in a full parallel
+  > `cargo test --workspace` and passed when run alone and on the next full run. The tests share
+  > a chamber registry path, so parallel runs can see each other's entries. Fix by giving each
+  > test its own registry root, the way the foundation tests already do.
+  >
+  > Recorded rather than retried until green: a flaky test is a test that will fail on someone
+  > else's machine at the worst moment.
+
+  **Must NOT do**:
+  - Do not raise the test timeout to paper over it. The race is shared state, not slowness.
 
 ---
 

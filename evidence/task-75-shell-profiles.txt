@@ -1,0 +1,15 @@
+# shells, links and the bootstrap order
+# command: cargo test -p dome-cli --test shell -j4
+
+a_symlink_is_a_link_not_a_copy ... ok
+a_statically_linked_shell_can_be_installed_as_a_profile ... ok
+a_dynamic_shell_is_refused ... ok
+a_missing_shell_profile_says_how_to_install_one ... ok
+
+# measured builds, no distribution involved:
+#   bash 5.2.37 static   1318952 bytes  (musl-gcc, --without-bash-malloc, -std=gnu89)
+#   busybox 1.36.1       2526344 bytes  (musl-gcc, defconfig)
+
+# the profile store now holds the real thing:
+#   dome shell import --profile bash --from /tmp/dome-bash/bash-5.2.37/bash
+#   ~/.local/share/dome/shells/bash/sh  1318952 bytes

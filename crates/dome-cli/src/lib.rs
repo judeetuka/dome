@@ -10,6 +10,7 @@ pub mod foundation_build;
 pub mod kernel;
 pub mod packaging;
 pub mod release;
+pub mod shell;
 
 /// Dome command-line entry point.
 #[derive(Debug, Parser)]
@@ -148,6 +149,12 @@ enum Commands {
         action: KernelAction,
     },
 
+    /// Manage shell profiles
+    Shell {
+        #[command(subcommand)]
+        action: ShellAction,
+    },
+
     /// Generate the keys a release needs
     Keygen {
         /// Directory to write the keys into
@@ -228,6 +235,22 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ShellAction {
+    /// Install a statically linked shell under a profile name
+    Import {
+        /// Profile name, for example bash
+        #[arg(long, value_name = "NAME")]
+        profile: String,
+        /// The shell binary to install
+        #[arg(long, value_name = "PATH")]
+        from: PathBuf,
+    },
+
+    /// List installed profiles
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -484,6 +507,23 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             }
         },
 
+        Commands::Shell { action } => match action {
+            ShellAction::Import { profile, from } => {
+                shell::import(&shell::shell_root(), &profile, &from).map_err(CliError::Failed)
+            }
+            ShellAction::List => {
+                let profiles = shell::list(&shell::shell_root()).map_err(CliError::Failed)?;
+                if profiles.is_empty() {
+                    Ok("no shell profiles installed".to_owned())
+                } else {
+                    Ok(profiles
+                        .into_iter()
+                        .map(|profile| format!("{profile}\n"))
+                        .collect())
+                }
+            }
+        },
+
         Commands::Keygen { out } => {
             let files = release::KeyFiles::in_dir(&out);
             files.generate().map_err(CliError::Failed)?;
@@ -542,6 +582,7 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
                 init,
                 workload,
                 fetcher,
+                shell_root: shell::shell_root(),
             })
             .map_err(CliError::Failed)
         }

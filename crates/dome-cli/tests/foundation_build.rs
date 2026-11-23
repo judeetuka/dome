@@ -60,6 +60,7 @@ fn a_recipe_becomes_a_foundation_directory() {
         init: static_init(),
         workload: None,
         fetcher: None,
+        shell_root: dir.join("shells"),
     })
     .expect("build");
 
@@ -101,6 +102,7 @@ fn a_recipe_with_packages_finds_the_static_fetcher_itself() {
         init: static_init(),
         workload: None,
         fetcher: None,
+        shell_root: dir.join("shells"),
     });
 
     match report {
@@ -150,6 +152,7 @@ fn a_dynamic_fetcher_is_refused_because_it_would_depend_on_the_host() {
         init: static_init(),
         workload: None,
         fetcher: Some(dynamic),
+        shell_root: dir.join("shells"),
     })
     .unwrap_err();
 
@@ -177,6 +180,7 @@ fn a_static_fetcher_puts_the_bootstrap_into_the_image() {
         workload: None,
         // The static init is a static ELF, which is all the check needs.
         fetcher: Some(init),
+        shell_root: dir.join("shells"),
     })
     .expect("build");
 
@@ -227,6 +231,7 @@ fn a_built_foundation_boots_as_a_chamber() {
         init: Some(init),
         workload: None,
         fetcher: None,
+        shell_root: dir.join("shells"),
     })
     .expect("build");
 
@@ -286,6 +291,7 @@ fn a_foundation_builds_without_being_given_a_kernel() {
         init: static_init(),
         workload: None,
         fetcher: None,
+        shell_root: dir.join("shells"),
     })
     .expect("build");
 
@@ -311,6 +317,7 @@ fn a_missing_profile_names_the_command_that_fixes_it() {
         init: static_init(),
         workload: None,
         fetcher: None,
+        shell_root: dir.join("shells"),
     })
     .unwrap_err();
 
