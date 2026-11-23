@@ -6,6 +6,7 @@ use dome_config::Blueprint;
 use dome_host_linux::{HostReport, ProbeRoot};
 
 pub mod chambers;
+pub mod foundation_build;
 pub mod packaging;
 pub mod release;
 
@@ -183,14 +184,26 @@ enum Commands {
         keys: PathBuf,
     },
 
-    /// Build a foundation from a recipe (arrives in M5)
+    /// Build a foundation from a recipe
     Build {
-        /// Recipe name, for example buildroot-minimal
-        #[arg(long, value_name = "NAME", conflicts_with = "list")]
-        recipe: Option<String>,
-        /// List the available recipes
+        /// Recipe path; the file may include others
+        #[arg(long, value_name = "TOML")]
+        recipe: Option<PathBuf>,
+        /// List the available recipe files in the workspace
         #[arg(long)]
         list: bool,
+        /// The kernel to ship
+        #[arg(long, value_name = "BZIMAGE")]
+        kernel: Option<PathBuf>,
+        /// Where the foundation directory goes
+        #[arg(long, value_name = "DIR")]
+        output: Option<PathBuf>,
+        /// The static init to run as pid 1
+        #[arg(long, value_name = "PATH")]
+        init: Option<PathBuf>,
+        /// A program to embed and run
+        #[arg(long, value_name = "PATH")]
+        workload: Option<PathBuf>,
     },
 
     /// Print the header of a .dome artifact (arrives in M2)
@@ -456,10 +469,39 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
         } => packaging::import(&package, &release::KeyFiles::in_dir(&keys), &output)
             .map_err(CliError::Failed),
 
+        Commands::Build {
+            recipe,
+            list,
+            kernel,
+            output,
+            init,
+            workload,
+        } => {
+            if list {
+                return Ok(
+                    "recipe files are discovered in the workspace; pass --recipe <path>".to_owned(),
+                );
+            }
+
+            let (Some(recipe), Some(kernel), Some(output)) = (recipe, kernel, output) else {
+                return Err(CliError::Usage(
+                    "build needs --recipe <toml>, --kernel <bzImage> and --output <dir>".to_owned(),
+                ));
+            };
+
+            foundation_build::build(&foundation_build::BuildOptions {
+                recipe,
+                kernel,
+                output,
+                init,
+                workload,
+            })
+            .map_err(CliError::Failed)
+        }
+
         Commands::Inspect { artifact, keys } => {
             release::inspect(&artifact, &release::KeyFiles::in_dir(&keys)).map_err(CliError::Failed)
         }
-        Commands::Build { .. } => Err(CliError::NotYetImplemented("build")),
         Commands::Foundation { action } => match action {
             FoundationAction::Info { .. } => Err(CliError::NotYetImplemented("foundation info")),
 

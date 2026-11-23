@@ -1,0 +1,21 @@
+# M5 progress: a foundation Dome builds and boots
+# command: cargo test -p dome-cli --test foundation_build --test foundation_boot -j4
+
+foundation_boot:
+  an_initramfs_we_build_contains_what_we_put_in_it ... ok
+  an_escaping_path_is_refused ... ok
+  a_foundation_of_our_own_boots ... ok
+
+foundation_build:
+  a_recipe_becomes_a_foundation_directory ... ok
+  a_recipe_that_asks_for_packages_is_refused_for_now ... ok
+  a_built_foundation_boots_as_a_chamber ... ok
+
+# the static init:
+#   target/x86_64-unknown-linux-musl/release/dome-init
+#   418488 bytes, "statically linked"
+#
+# the bug this found:
+#   INITRD_ADDRESS was fixed at 0x1000_0000 (256 MiB), so a 64 MiB chamber could not
+#   carry an initramfs at all: "write of 208459 bytes at 0x10000000 ... past 0x4000000".
+#   Placement is now derived from guest size.

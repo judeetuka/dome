@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 366 tests passing
+**Verified state of the tree**: 373 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -2689,6 +2689,30 @@ Max Concurrent: 6 (M1 wave)
 
   **Recommended Agent Profile**: `unspecified-high`
   **Parallelization**: Can Run In Parallel NO | Blocks: M6 | Blocked By: T29-T31
+
+  > **Partial, and the part that exists is real.** A foundation built by `dome build` boots
+  > through the same path a chamber uses: recipe -> foundation directory -> cell resolves it ->
+  > engine boots it -> our own PID 1 runs inside the guest. **Six tests**, one of which performs
+  > the whole loop.
+  >
+  > What was built on the way:
+  > - `dome-image/src/initramfs.rs`: a cpio "newc" writer with gzip, because the kernel's first
+  >   filesystem is the smallest possible delivery mechanism (no block device, no filesystem
+  >   image, no partition table). Trailer and four-byte alignment are the parts that silently
+  >   produce unbootable archives, so both are tested.
+  > - `crates/dome-init`: PID 1 in **418 KB, statically linked** against musl. It mounts devtmpfs
+  >   and proc, then either execs `/workload` or stays alive. Static is not a preference: the
+  >   kernel's own documentation lists missing library dependencies as a way init fails.
+  > - `dome build --recipe <toml> --kernel <bzImage> --output <dir>`, which produces
+  >   `vmlinuz`, `initramfs.cpio.gz` and a `foundation.toml` manifest.
+  >
+  > **A real bug found by leaning on it:** the initramfs address was hardcoded at 256 MiB, so any
+  > chamber smaller than that could not carry one — exactly backwards, since the leanest chambers
+  > are the ones most likely to have one. Placement is now derived from guest size.
+  >
+  > **Not done:** package installation (needs apk or pacman writing into a staging root), the
+  > Buildroot and Alpine recipes, and kernel profile fragments. A recipe that asks for packages is
+  > **refused** rather than silently producing an image without them.
 
   **Acceptance Criteria**:
   - [ ] All M5 tests pass

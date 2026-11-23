@@ -1,0 +1,19 @@
+[package]
+name = "dome-init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dome-init"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+# No workspace lints: this crate is built for a musl target where the workspace's settings still
+# apply, and it keeps the dependency list empty so the resulting binary stays small enough to be
+# the only thing in an initramfs.
+[lints.rust]
+unsafe_code = "warn"

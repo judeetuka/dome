@@ -13,7 +13,7 @@ use std::time::Duration;
 use dome_core::MemorySize;
 
 use crate::EngineError;
-use crate::boot::{INITRD_ADDRESS, PlacedInitrd, write_zero_page};
+use crate::boot::{PlacedInitrd, write_zero_page};
 use crate::devices::ChamberIo;
 use crate::linux::LinuxEngine;
 use crate::loader::{MIN_KERNEL_ADDRESS, load_bzimage};
@@ -153,10 +153,13 @@ impl LinuxEngine {
                     )));
                 }
 
-                memory.write(INITRD_ADDRESS, &bytes)?;
+                // Placement depends on the chamber's size: a fixed high address would put the
+                // archive outside guest RAM in any chamber smaller than that address.
+                let address = crate::boot::initrd_address(memory.size_bytes(), bytes.len())?;
+                memory.write(address, &bytes)?;
 
                 Some(PlacedInitrd {
-                    address: INITRD_ADDRESS,
+                    address,
                     size: bytes.len(),
                 })
             }

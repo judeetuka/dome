@@ -1,0 +1,123 @@
+//! The smallest useful PID 1.
+//!
+//! This is the init a foundation gets when it does not ask for a service manager: mount nothing
+//! it does not need, print something so a boot can be observed, and either hand over to the
+//! workload or stay alive.
+//!
+//! It is deliberately tiny and statically linked. The kernel's own documentation lists missing
+//! library dependencies as a way init fails to start, and a static binary cannot fail that way.
+//! It also means a foundation containing this file needs no C library at all.
+
+use std::io::Write;
+use std::path::Path;
+
+/// Where a workload embedded in the image is placed by the builder.
+const EMBEDDED_WORKLOAD: &str = "/workload";
+
+fn main() {
+    mount_devtmpfs();
+
+    // The kernel starts init with no arguments, so an embedded program is found by convention.
+    let workload = std::env::args().nth(1).or_else(|| {
+        Path::new(EMBEDDED_WORKLOAD)
+            .is_file()
+            .then(|| EMBEDDED_WORKLOAD.to_owned())
+    });
+
+    say(&format!(
+        "dome-init: starting as pid 1{}",
+        match &workload {
+            Some(path) => format!(", then handing over to {path}"),
+            None => String::new(),
+        }
+    ));
+
+    match workload {
+        Some(path) => {
+            // Replacing pid 1 rather than forking keeps the workload as the reaper, which is
+            // what a single-process chamber wants.
+            use std::os::unix::process::CommandExt;
+            let error = std::process::Command::new(&path).arg0(&path).exec();
+            say(&format!("dome-init: cannot execute {path}: {error}"));
+            halt(127);
+        }
+        None => {
+            say("dome-init: nothing to run, staying alive");
+            // Sleeping rather than exiting: the kernel panics if pid 1 exits, and a panic would
+            // look like a failure when the boot actually succeeded.
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            }
+        }
+    }
+}
+
+/// Mount devtmpfs on /dev, which is where the console device lives.
+///
+/// The kernel hands init a console, but only if the device node exists. A foundation carries an
+/// empty /dev, so the first thing a real init does is fill it. Without this, writes go nowhere and
+/// a boot looks silent even though the binary ran.
+fn mount_devtmpfs() {
+    let _ = std::fs::create_dir_all("/dev");
+
+    #[allow(unsafe_code)]
+    // SAFETY: the three byte strings are NUL-terminated and outlive the call, the flags are
+    // zero, and the data pointer is null, which is what devtmpfs expects for a fresh mount.
+    let result = unsafe {
+        libc::mount(
+            c"devtmpfs".as_ptr(),
+            c"/dev".as_ptr(),
+            c"devtmpfs".as_ptr(),
+            0,
+            std::ptr::null(),
+        )
+    };
+
+    // Success, or it was already mounted by a previous boot stage; either way /dev is usable.
+    let _ = result;
+
+    // /tmp and /proc are commonly expected even by a minimal workload.
+    let _ = std::fs::create_dir_all("/tmp");
+    let _ = std::fs::create_dir_all("/proc");
+    #[allow(unsafe_code)]
+    // SAFETY: as above; proc takes no data pointer.
+    let _ = unsafe {
+        libc::mount(
+            c"proc".as_ptr(),
+            c"/proc".as_ptr(),
+            c"proc".as_ptr(),
+            0,
+            std::ptr::null(),
+        )
+    };
+}
+
+/// Write a line where a boot observer will see it.
+///
+/// /dev/console is the kernel's own console and works before anything else is mounted; stdout
+/// is a fallback for a run where the console device is absent.
+fn say(message: &str) {
+    let line = format!("{message}\n");
+
+    if let Ok(mut console) = std::fs::OpenOptions::new().write(true).open("/dev/console") {
+        let _ = console.write_all(line.as_bytes());
+        let _ = console.flush();
+    }
+
+    let _ = std::io::stdout().write_all(line.as_bytes());
+    let _ = std::io::stdout().flush();
+
+    // Also leave a trace on the kernel ring buffer, which survives even when the console does not.
+    if let Ok(mut kmsg) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        let _ = kmsg.write_all(format!("dome-init: {message}\n").as_bytes());
+    }
+}
+
+fn halt(code: i32) -> ! {
+    #[allow(unsafe_code)]
+    // SAFETY: reboot with RB_POWER_OFF takes no pointers and does not touch memory.
+    unsafe {
+        libc::reboot(libc::RB_POWER_OFF);
+    }
+    std::process::exit(code)
+}

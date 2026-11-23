@@ -28,8 +28,40 @@ pub const CMDLINE_ADDRESS: u64 = 0x0002_0000;
 /// Maximum command line length the kernel accepts.
 pub const CMDLINE_CAPACITY: usize = 2048;
 
-/// Where an initramfs is placed: high enough to clear the decompressor workspace.
+/// The preferred initramfs address, used when the guest has room for it.
 pub const INITRD_ADDRESS: u64 = 0x1000_0000;
+
+/// Keep this much room between the initramfs and the top of RAM.
+const INITRD_MARGIN: u64 = 0x10_0000;
+
+/// Where to put an initramfs in this chamber.
+///
+/// The preferred address is used when it fits, and otherwise the archive goes as high as it can.
+/// A fixed address meant any chamber smaller than 256 MiB could not carry an initramfs at all,
+/// which is exactly backwards: the leanest chambers are the ones most likely to want one.
+pub fn initrd_address(memory_size: u64, initrd_size: usize) -> Result<u64, crate::EngineError> {
+    let size = initrd_size as u64;
+    if size == 0 {
+        return Err(crate::EngineError::Setup(
+            "an empty initramfs cannot be placed".to_owned(),
+        ));
+    }
+
+    let ceiling = memory_size
+        .saturating_sub(size)
+        .saturating_sub(INITRD_MARGIN);
+    let address = INITRD_ADDRESS.min(ceiling) & !0xFFF;
+
+    // The kernel is loaded at MIN_KERNEL_ADDRESS and decompresses upward from there.
+    let floor = crate::loader::MIN_KERNEL_ADDRESS + size;
+    if address <= floor {
+        return Err(crate::EngineError::Setup(format!(
+            "a {size}-byte initramfs does not fit in {memory_size} bytes of guest memory"
+        )));
+    }
+
+    Ok(address)
+}
 
 /// A placed initramfs: address and length.
 #[derive(Debug, Clone, Copy)]

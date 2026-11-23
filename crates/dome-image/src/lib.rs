@@ -3,6 +3,7 @@ pub mod export;
 pub mod format;
 pub mod header;
 pub mod image_error;
+pub mod initramfs;
 pub mod manifest;
 pub mod reader;
 pub mod seal;

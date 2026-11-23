@@ -74,9 +74,9 @@ fn unreadable_blueprint_is_a_validation_failure() {
 
 #[test]
 fn unimplemented_commands_exit_2_and_say_so() {
-    // run, stop and ps are implemented now; seal and export were replaced by release and
-    // inspect. Only the commands that genuinely do not exist yet are listed here.
-    let cases: [&[&str]; 2] = [&["build", "--list"], &["foundation", "info", "base.dome"]];
+    // run, stop, ps, build, release, inspect, export and import are all implemented now. Only
+    // the one command that genuinely does not exist yet is listed here.
+    let cases: [&[&str]; 1] = [&["foundation", "info", "base.dome"]];
 
     for case in cases {
         let error = run(argv(case)).unwrap_err();
@@ -195,9 +195,17 @@ fn completions_are_generated_for_every_shell() -> TestResult {
 }
 
 #[test]
-fn build_rejects_recipe_and_list_together() {
-    let error = run(argv(&["build", "--recipe", "x", "--list"])).unwrap_err();
-    assert!(matches!(error, CliError::Usage(_)));
+fn build_list_reports_where_recipes_come_from() {
+    // build --list used to be a stub; it now answers, because recipes are ordinary files.
+    let output = run(argv(&["build", "--list"])).expect("list");
+    assert!(output.contains("--recipe"), "{output}");
+}
+
+#[test]
+fn build_without_inputs_is_a_usage_error() {
+    let error = run(argv(&["build"])).unwrap_err();
+    assert!(matches!(error, CliError::Usage(_)), "{error:?}");
+    assert!(error.to_string().contains("--recipe"), "{error}");
 }
 
 #[test]
