@@ -13,10 +13,9 @@
 //! supported, and does the bookkeeping rather than leaving it to be discovered.
 
 use crate::ConfigError;
-use crate::installer::Installer;
 
 /// Which package manager fetches a package.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PackageSource {
     /// Whatever the recipe's builder uses.
     #[default]
@@ -28,42 +27,110 @@ pub enum PackageSource {
     /// yay, the AUR through pacman's interface.
     Yay,
     /// mise, which installs self-contained toolchains with no root and no distribution.
-    ///
-    /// This is the source that fits Dome's model best: a mise toolchain is a directory, so it
-    /// can be copied into an image as-is, and it needs no base system to exist first.
     Mise,
+    /// One of mise's backends: cargo, npm, pipx, go, github, gitlab, aqua, http.
+    ///
+    /// These are still mise packages. Naming the backend is how a user says *where* the tool
+    /// comes from, exactly as they would in a mise.toml, and the image still needs mise to
+    /// install it.
+    MiseBackend(String),
+}
+
+/// The backends mise can install from.
+pub const MISE_BACKENDS: [&str; 8] = [
+    "cargo", "npm", "pipx", "go", "github", "gitlab", "aqua", "http",
+];
+
+impl PackageSource {
+    /// Whether this package is installed by mise.
+    pub fn is_mise(&self) -> bool {
+        matches!(self, Self::Default | Self::Mise | Self::MiseBackend(_))
+    }
 }
 
 impl PackageSource {
     /// Parse a prefix.
+    ///
+    /// The managers Dome drives itself are named explicitly. Anything else that looks like a
+    /// word is a mise backend, because mise owns that vocabulary and adds to it: a whitelist here
+    /// would quietly turn a new backend into part of a package name.
     pub fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "" => Self::Default,
-            "apk" => Self::Apk,
-            "pacman" => Self::Pacman,
-            "yay" | "aur" => Self::Yay,
-            "mise" => Self::Mise,
-            _ => return None,
-        })
+        match value {
+            "" => Some(Self::Default),
+            "apk" => Some(Self::Apk),
+            "pacman" => Some(Self::Pacman),
+            "yay" | "aur" => Some(Self::Yay),
+            "mise" => Some(Self::Mise),
+            other
+                if !other.is_empty()
+                    && other
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '-') =>
+            {
+                Some(Self::MiseBackend(other.to_owned()))
+            }
+            _ => None,
+        }
     }
 
     /// The prefix as written.
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Default => "",
             Self::Apk => "apk",
             Self::Pacman => "pacman",
             Self::Yay => "yay",
             Self::Mise => "mise",
+            Self::MiseBackend(backend) => backend,
+        }
+    }
+}
+
+/// A package manager an image needs.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Manager {
+    /// mise, which installs self-contained tool directories.
+    Mise,
+    /// apk.
+    Apk,
+    /// pacman.
+    Pacman,
+    /// yay, for the AUR.
+    Yay,
+}
+
+impl Manager {
+    /// The name a user writes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mise => "mise",
+            Self::Apk => "apk",
+            Self::Pacman => "pacman",
+            Self::Yay => "yay",
+        }
+    }
+
+    /// Where the chamber fetches it from, when it has to fetch it at all.
+    ///
+    /// mise publishes a single install entry point; the others come from their distributions.
+    pub fn bootstrap_url(self) -> Option<&'static str> {
+        match self {
+            Self::Mise => Some("https://mise.run"),
+            _ => None,
         }
     }
 }
 
 /// A package, optionally pinned and optionally sourced from a named manager.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PackageSpec {
     /// Which package manager fetches it.
     pub source: PackageSource,
+    /// Tool options, passed through as written: components, targets, asset_pattern, npm_args.
+    ///
+    /// These are mise's own vocabulary, and copying them verbatim is deliberate. Inventing a
+    /// Dome dialect for them would mean every user translating their mise.toml twice.
+    pub options: std::collections::BTreeMap<String, toml::Value>,
     /// Package name.
     pub name: String,
     /// Version to pin to, if any.
@@ -75,8 +142,61 @@ impl PackageSpec {
     pub fn named(name: &str) -> Self {
         Self {
             source: PackageSource::Default,
+            options: std::collections::BTreeMap::new(),
             name: name.to_owned(),
             version: None,
+        }
+    }
+
+    /// Build a package from a mise-style entry: a version string, or a table of options.
+    ///
+    /// `"npm:prettier" = "latest"` and `rust = { version = "stable", components = ["clippy"] }`
+    /// are both valid, because both are valid in a mise.toml.
+    pub fn from_entry(spec: &str, entry: Option<&toml::Value>) -> Result<Self, ConfigError> {
+        let mut package = Self::parse(spec)?;
+
+        match entry {
+            None => {}
+            Some(toml::Value::String(version)) => {
+                if version != "latest" {
+                    package.version = Some(version.clone());
+                }
+            }
+            Some(toml::Value::Table(table)) => {
+                for (key, value) in table {
+                    if key == "version" {
+                        if let Some(version) = value.as_str()
+                            && version != "latest"
+                        {
+                            package.version = Some(version.to_owned());
+                        }
+                        continue;
+                    }
+                    package.options.insert(key.clone(), value.clone());
+                }
+            }
+            Some(other) => {
+                return Err(ConfigError::InvalidValue {
+                    field: "packages",
+                    reason: format!(
+                        "{spec:?} has a {other:?} entry; expected a version or a table"
+                    ),
+                });
+            }
+        }
+
+        Ok(package)
+    }
+
+    /// The package manager that installs this package.
+    pub fn manager(&self) -> Manager {
+        match &self.source {
+            PackageSource::Default | PackageSource::Mise | PackageSource::MiseBackend(_) => {
+                Manager::Mise
+            }
+            PackageSource::Apk => Manager::Apk,
+            PackageSource::Pacman => Manager::Pacman,
+            PackageSource::Yay => Manager::Yay,
         }
     }
 
@@ -105,8 +225,17 @@ impl PackageSpec {
             });
         }
 
-        let (name, version) = match body.split_once('@') {
+        // A leading @ is a scope ("@openai/codex"), not a version separator, so the version is
+        // taken from the last @ that is not the first character.
+        let separator = body
+            .char_indices()
+            .filter(|(index, character)| *character == '@' && *index > 0)
+            .map(|(index, _)| index)
+            .next_back();
+
+        let (name, version) = match separator.map(|index| body.split_at(index)) {
             Some((name, version)) => {
+                let version = version.trim_start_matches('@');
                 if version.trim().is_empty() {
                     return Err(ConfigError::InvalidValue {
                         field: "packages",
@@ -128,6 +257,7 @@ impl PackageSpec {
 
         Ok(Self {
             source,
+            options: std::collections::BTreeMap::new(),
             name: name.to_owned(),
             version,
         })
@@ -135,7 +265,7 @@ impl PackageSpec {
 
     /// How it is written in a plan or a report.
     pub fn label(&self) -> String {
-        let prefix = match self.source {
+        let prefix = match &self.source {
             PackageSource::Default => String::new(),
             other => format!("{}:", other.as_str()),
         };
@@ -148,7 +278,7 @@ impl PackageSpec {
 }
 
 /// One section of packages.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Packages {
     /// The packages in this section.
     pub packages: Vec<PackageSpec>,
@@ -386,7 +516,7 @@ pub struct Workspace {
 }
 
 /// What a foundation should contain.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Recipe {
     /// Foundation name.
     pub name: String,
@@ -412,10 +542,6 @@ pub struct Recipe {
     pub artifacts: Vec<String>,
     /// The interactive shell, if the image has one.
     pub shell: Option<Shell>,
-    /// Which package manager the chamber installs for itself.
-    pub installer: Installer,
-    /// Where the chamber fetches its installer from.
-    pub installer_source: Option<String>,
     /// Who the chamber runs as.
     pub user: UserSpec,
     /// Where the project lives inside the chamber.
@@ -423,7 +549,7 @@ pub struct Recipe {
 }
 
 /// The shell an image offers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Shell {
     /// Which shell starts by default.
     pub default: String,
@@ -447,8 +573,6 @@ impl Recipe {
             build: Packages::default(),
             artifacts: Vec::new(),
             shell: None,
-            installer: Installer::None,
-            installer_source: None,
             user: UserSpec::Root,
             workspace: None,
         }
@@ -484,9 +608,6 @@ impl Recipe {
             workload: Option<String>,
             #[serde(default)]
             package_manager: String,
-            #[serde(default)]
-            installer: String,
-            installer_source: Option<String>,
             /// Shorthand for the runtime section.
             #[serde(default)]
             packages: Vec<String>,
@@ -494,14 +615,20 @@ impl Recipe {
 
         #[derive(serde::Deserialize, Default)]
         struct PackageTable {
+            /// Shorthand: a list of specs.
             #[serde(default)]
             packages: Vec<String>,
+            /// mise-style tools: a spec as the key, a version or a table of options as the value.
+            #[serde(default)]
+            tools: std::collections::BTreeMap<String, toml::Value>,
         }
 
         #[derive(serde::Deserialize, Default)]
         struct BuildTable {
             #[serde(default)]
             packages: Vec<String>,
+            #[serde(default)]
+            tools: std::collections::BTreeMap<String, toml::Value>,
             #[serde(default)]
             artifacts: Vec<String>,
         }
@@ -555,6 +682,11 @@ impl Recipe {
         runtime
             .packages
             .extend(Packages::parse(&file.foundation.packages)?.packages);
+        for (spec, entry) in &file.runtime.tools {
+            runtime
+                .packages
+                .push(PackageSpec::from_entry(spec, Some(entry))?);
+        }
 
         let recipe = Self {
             name: file.foundation.name,
@@ -574,7 +706,15 @@ impl Recipe {
                 },
             )?,
             runtime,
-            build: Packages::parse(&file.build.packages)?,
+            build: {
+                let mut build = Packages::parse(&file.build.packages)?;
+                for (spec, entry) in &file.build.tools {
+                    build
+                        .packages
+                        .push(PackageSpec::from_entry(spec, Some(entry))?);
+                }
+                build
+            },
             artifacts: file.build.artifacts,
             user: match file.user {
                 None => UserSpec::Root,
@@ -603,13 +743,6 @@ impl Recipe {
                 path: workspace.path,
                 host: workspace.host,
             }),
-            installer: Installer::parse(&file.foundation.installer).ok_or_else(|| {
-                ConfigError::Unknown {
-                    kind: "installer",
-                    value: file.foundation.installer.clone(),
-                }
-            })?,
-            installer_source: file.foundation.installer_source,
             shell: match file.shell {
                 Some(shell) => Some(Shell {
                     default: shell.default,
@@ -711,10 +844,6 @@ impl Recipe {
             });
         }
 
-        if self.installer.needs_binary() && self.installer_source.is_none() {
-            return Err(ConfigError::MissingField("foundation.installer_source"));
-        }
-
         if self.init == InitChoice::None && self.workload.is_none() {
             return Err(ConfigError::MissingField(
                 "foundation.workload (required when init = none)",
@@ -722,6 +851,25 @@ impl Recipe {
         }
 
         Ok(())
+    }
+
+    /// The package managers this recipe needs, derived from its packages.
+    ///
+    /// A user never names them. `mise:node`, `cargo:ast-grep` and `npm:prettier` all need mise;
+    /// `pacman:docker` needs pacman. Asking a user to declare that a second time is asking them
+    /// to repeat what their package list already said.
+    pub fn managers(&self) -> Vec<Manager> {
+        let mut managers: Vec<Manager> = self
+            .runtime
+            .packages
+            .iter()
+            .chain(self.build.packages.iter())
+            .map(|package| package.manager())
+            .collect();
+
+        managers.sort();
+        managers.dedup();
+        managers
     }
 
     /// What the image will contain, and what it will cost.
@@ -768,22 +916,14 @@ impl Recipe {
             }
         }
 
-        if !self.installer.needs_binary()
-            && (!self.runtime.packages.is_empty() || !self.build.packages.is_empty())
-        {
-            // Parsing stays permissive because a plan is useful without an installer; producing an
-            // image is not, and the builder refuses there.
-            notes.push(
-                "packages are named but no installer is: nothing will install them inside the chamber"
-                    .to_owned(),
-            );
-        }
-
-        if self.installer.needs_binary() {
+        // The package managers are not configured; they are implied by what the packages are.
+        // Naming a mise backend is enough to say the image needs mise.
+        let managers = self.managers();
+        if !managers.is_empty() {
+            let names: Vec<&str> = managers.iter().map(|manager| manager.as_str()).collect();
             notes.push(format!(
-                "{} is installed by the chamber itself from {}",
-                self.installer.as_str(),
-                self.installer_source.as_deref().unwrap_or("(no source)")
+                "the chamber installs its own packages with {}",
+                names.join(", ")
             ));
         }
 
@@ -794,8 +934,8 @@ impl Recipe {
             notes.push(format!(
                 "the image carries {package} and can install at runtime"
             ));
-        } else {
-            notes.push("no package manager in the image".to_owned());
+        } else if managers.is_empty() {
+            notes.push("no package manager in the image, and none needed".to_owned());
         }
 
         if !self.build.packages.is_empty() {

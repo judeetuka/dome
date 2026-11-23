@@ -49,27 +49,24 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     let recipe = Recipe::from_toml(&merged).map_err(|error| error.to_string())?;
     let plan = recipe.plan();
 
-    // The chamber installs its own packages, so an image whose recipe names packages but no
-    // installer would boot into a filesystem that could never gain them.
-    if !recipe.installer.needs_binary()
-        && (!recipe.runtime.packages.is_empty() || !recipe.build.packages.is_empty())
-    {
-        return Err(
-            "this recipe names packages but no installer: the chamber installs its own packages, \
-             so name one with installer = \"mise\" and installer_source = \"<url>\""
-                .to_owned(),
-        );
-    }
+    // The managers are implied by the packages: naming a mise backend says the image needs mise.
+    // No user ever writes an installer field, because their package list already answered it.
+    let managers = recipe.managers();
 
-    // Packages are installed by the chamber, from the network, by the installer the recipe names.
-    // Nothing is copied out of the host, because a host may be macOS or Windows and have no Linux
-    // toolchains at all - and whatever it has is linked against its own C library.
-    let bootstrap = if recipe.installer.needs_binary() {
-        let fetcher = options.fetcher.clone().ok_or_else(|| {
-            "this recipe installs packages inside the chamber, which needs a statically linked \
-             fetcher embedded in the image. Pass --fetcher <path>."
-                .to_owned()
-        })?;
+    let bootstrap = if managers.is_empty() {
+        None
+    } else {
+        let fetcher = match options.fetcher.clone().or_else(default_fetcher) {
+            Some(path) => path,
+            None => {
+                return Err(
+                    "this recipe names packages, so the chamber installs them itself and needs a \
+                     statically linked fetcher in the image. Build one with: cargo build --release \
+                     --target x86_64-unknown-linux-musl -p dome-fetch"
+                        .to_owned(),
+                );
+            }
+        };
 
         let bytes = fs::read(&fetcher)
             .map_err(|error| format!("cannot read the fetcher {}: {error}", fetcher.display()))?;
@@ -85,8 +82,6 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
         }
 
         Some((fetcher, bytes))
-    } else {
-        None
     };
 
     let init = match options.init.clone() {
@@ -125,11 +120,14 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
 
         // The chamber reads this at boot to install what the recipe asked for.
-        let mut manifest = format!(
-            "installer={}\nsource={}\n",
-            recipe.installer.as_str(),
-            recipe.installer_source.as_deref().unwrap_or_default()
-        );
+        let mut manifest = String::new();
+        for manager in &managers {
+            manifest.push_str(&format!("manager={}\n", manager.as_str()));
+            if let Some(source) = manager.bootstrap_url() {
+                manifest.push_str(&format!("source={}\n", manager.as_str()));
+                manifest.push_str(&format!("url={source}\n"));
+            }
+        }
         for package in &plan.runtime_packages {
             manifest.push_str(&format!("package={package}\n"));
         }
@@ -195,6 +193,13 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     }
 
     Ok(report)
+}
+
+/// The static fetcher shipped with the workspace, if it has been built.
+pub fn default_fetcher() -> Option<PathBuf> {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let path = workspace.join("target/x86_64-unknown-linux-musl/release/dome-fetch");
+    path.is_file().then_some(path)
 }
 
 /// The static init shipped with the workspace, if it has been built.

@@ -82,18 +82,18 @@ fn a_recipe_becomes_a_foundation_directory() {
 }
 
 #[test]
-fn a_recipe_with_packages_needs_a_static_fetcher() {
+fn a_recipe_with_packages_finds_the_static_fetcher_itself() {
     let Some(kernel) = fixture_kernel() else {
         return;
     };
 
-    let dir = scratch("bootstrap");
+    let dir = scratch("autofetch");
     let recipe = dir.join("dome.toml");
     std::fs::write(&recipe, RECIPE_WITH_PACKAGES).expect("recipe");
 
-    // Without a fetcher the chamber could never install anything, so the build says so instead
-    // of producing an image that fails at first boot.
-    let error = build(&BuildOptions {
+    // No fetcher is passed: the managers are implied by the packages, and the fetcher is the
+    // static one in the workspace. A user configures neither.
+    let report = build(&BuildOptions {
         recipe,
         kernel: Some(kernel),
         kernel_root: dir.join("kernels"),
@@ -101,10 +101,20 @@ fn a_recipe_with_packages_needs_a_static_fetcher() {
         init: static_init(),
         workload: None,
         fetcher: None,
-    })
-    .unwrap_err();
+    });
 
-    assert!(error.contains("--fetcher"), "{error}");
+    match report {
+        Ok(report) => assert!(
+            report.contains("installs its own packages with mise"),
+            "{report}"
+        ),
+        Err(error) => assert!(
+            error.contains("dome-fetch"),
+            "if the fetcher is missing the message must say how to build it: {error}"
+        ),
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -182,36 +192,14 @@ fn a_static_fetcher_puts_the_bootstrap_into_the_image() {
 }
 
 #[test]
-fn a_recipe_with_packages_is_refused_without_an_installer() {
-    let Some(kernel) = fixture_kernel() else {
-        return;
-    };
-
-    let dir = scratch("noinstaller");
-    let recipe = dir.join("dome.toml");
-    std::fs::write(
-        &recipe,
-        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\n\n[runtime]\npackages = [\"fish\"]\n",
+fn packages_alone_are_enough_to_require_installation() {
+    // The user never declares an installer; the package list is the declaration.
+    let recipe = dome_config::foundation_recipe::Recipe::from_toml(
+        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\n\n[runtime]\npackages = [\"mise:node@20\"]\n",
     )
     .expect("recipe");
 
-    // Parsing is permissive, because a plan without an installer is still useful. Producing an
-    // image is not: it would boot into a filesystem that could never gain its packages.
-    let error = build(&BuildOptions {
-        recipe,
-        kernel: Some(kernel),
-        kernel_root: dir.join("kernels"),
-        output: dir.join("out"),
-        init: static_init(),
-        workload: None,
-        fetcher: None,
-    })
-    .unwrap_err();
-
-    assert!(error.contains("installs its own packages"), "{error}");
-    assert!(error.contains("installer"), "{error}");
-
-    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(recipe.managers().len(), 1, "one manager, implied");
 }
 
 #[test]

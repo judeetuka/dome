@@ -1,7 +1,9 @@
 //! Foundation recipes: sections, pins, linking and cost.
 
 use dome_config::ConfigError;
-use dome_config::foundation_recipe::{InitChoice, PackageSpec, Recipe, ServiceManager, UserSpec};
+use dome_config::foundation_recipe::{
+    InitChoice, Manager, PackageSpec, Recipe, ServiceManager, UserSpec,
+};
 
 #[test]
 fn a_recipe_can_name_nothing_at_all() {
@@ -453,4 +455,128 @@ fn mise_is_a_package_source() {
             .runtime_packages
             .contains(&"mise:python@3.12".to_owned())
     );
+}
+
+// --- mise is implied, backends named the way mise names them, options pass through ---
+
+#[test]
+fn mise_packages_do_not_need_to_be_declared() {
+    // A user writes what they would write in a mise.toml; the image works out that it needs mise.
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\n\n[runtime]\npackages = [\"mise:node@20\"]\n",
+    )
+    .expect("recipe");
+
+    assert_eq!(recipe.managers(), vec![Manager::Mise]);
+    assert!(
+        recipe
+            .plan()
+            .notes
+            .iter()
+            .any(|note| note.contains("installs its own packages with mise"))
+    );
+}
+
+#[test]
+fn a_backend_prefix_is_still_a_mise_package() {
+    let spec = PackageSpec::parse("cargo:ast-grep").expect("spec");
+    assert_eq!(spec.label(), "cargo:ast-grep");
+    assert_eq!(spec.manager(), Manager::Mise);
+
+    let npm = PackageSpec::parse("npm:@openai/codex@1.2.3").expect("spec");
+    assert_eq!(npm.name, "@openai/codex");
+    assert_eq!(npm.version.as_deref(), Some("1.2.3"));
+    assert_eq!(npm.manager(), Manager::Mise);
+}
+
+#[test]
+fn several_managers_can_be_needed_at_once() {
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\n\n[runtime]\npackages = [\"node\", \"pacman:docker\"]\n",
+    )
+    .expect("recipe");
+
+    // Sorted and deduped: the image installs with both, and nothing asks the user to say so.
+    assert_eq!(recipe.managers(), vec![Manager::Mise, Manager::Pacman]);
+}
+
+#[test]
+fn tools_are_a_table_with_versions_and_options() {
+    // Shapes taken from a real mise.toml: a plain version, a table of options, and a backend key.
+    let input = [
+        "[foundation]",
+        "name = \"app\"",
+        "init = \"sentinel\"",
+        "",
+        "[runtime.tools]",
+        "node = \"lts\"",
+        "rust = { version = \"stable\", components = [\"clippy\", \"rustfmt\"] }",
+        "\"npm:@openai/codex\" = \"latest\"",
+        "\"npm:@opencode/cli\" = { version = \"latest\", npm_args = \"--ignore-scripts=false\" }",
+        "\"github:koalaman/shellcheck\" = \"latest\"",
+    ]
+    .join("\n");
+
+    let recipe = Recipe::from_toml(&input).expect("recipe");
+    let tools = &recipe.runtime.packages;
+
+    assert_eq!(tools.len(), 5);
+
+    let rust = tools.iter().find(|t| t.name == "rust").expect("rust");
+    assert_eq!(rust.version.as_deref(), Some("stable"));
+    assert_eq!(
+        rust.options
+            .get("components")
+            .and_then(|value| value.as_array())
+            .map(|values| values.len()),
+        Some(2)
+    );
+
+    let codex = tools
+        .iter()
+        .find(|t| t.name == "@opencode/cli")
+        .expect("codex");
+    assert_eq!(
+        codex
+            .options
+            .get("npm_args")
+            .and_then(|value| value.as_str()),
+        Some("--ignore-scripts=false"),
+        "tool options must survive verbatim"
+    );
+
+    // Every one of them is installed by mise, including the ones naming a backend.
+    assert_eq!(recipe.managers(), vec![Manager::Mise]);
+}
+
+#[test]
+fn build_tools_are_parsed_the_same_way() {
+    let input = [
+        "[foundation]",
+        "name = \"app\"",
+        "init = \"sentinel\"",
+        "",
+        "[build.tools]",
+        "\"cargo:just\" = \"latest\"",
+        "go = \"latest\"",
+    ]
+    .join("\n");
+
+    let recipe = Recipe::from_toml(&input).expect("recipe");
+    assert_eq!(recipe.build.packages.len(), 2);
+    assert_eq!(recipe.managers(), vec![Manager::Mise]);
+}
+
+#[test]
+fn a_backend_mise_does_not_know_yet_is_still_accepted() {
+    // mise owns the vocabulary of backends and keeps adding to it. A whitelist here would turn
+    // every new backend into a package name, so any word-like prefix is passed through.
+    let futuristic = PackageSpec::parse("ubi:BurntSushi/ripgrep").expect("spec");
+    assert_eq!(futuristic.label(), "ubi:BurntSushi/ripgrep");
+    assert_eq!(futuristic.name, "BurntSushi/ripgrep");
+    assert_eq!(futuristic.manager(), Manager::Mise);
+
+    // And a non-word prefix is not a backend, so the colon stays part of the name.
+    let plain = PackageSpec::parse("weird name:thing").expect("spec");
+    assert_eq!(plain.name, "weird name:thing");
 }
