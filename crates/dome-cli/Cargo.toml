@@ -27,4 +27,5 @@ dome-obfuscation = { path = "../dome-obfuscation" }
 workspace = true
 
 [dev-dependencies]
+dome-net = { path = "../dome-net" }
 dome-image = { path = "../dome-image" }

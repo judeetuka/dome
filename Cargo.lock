@@ -464,6 +464,7 @@ dependencies = [
  "dome-engine",
  "dome-host-linux",
  "dome-image",
+ "dome-net",
  "dome-obfuscation",
  "dome-supervisor",
  "thiserror 2.0.21",

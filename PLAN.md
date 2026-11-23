@@ -4119,9 +4119,19 @@ Max Concurrent: 6 (M1 wave)
   >    carries frames both ways. A request leaves and the answer comes back, over a real server.
   >    Remaining: the guest-side addressing, and a real kernel behind it.
   > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP.
-  >    Needs either a kernel built with CONFIG_IP_PNP (the ip= parameter) or dome-init configuring
-  >    the interface itself.
-  > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool
+  >    **Two blockers found by probing a real kernel**, and both were predictable:
+  >    - Linux on x86 does **not** probe virtio-mmio devices by itself. There is no device tree, so
+  >      each window has to be named on the command line: `virtio_mmio.device=0x1000@0xd0000000:`<irq>
+  >      The engine has never passed that parameter, which is why the boot log shows no virtio
+  >      activity at all.
+  >    - device-to-guest signalling needs an IRQ. That is the gap flagged when the device was
+  >      written, and it is now the thing standing between the device and a working network: a
+  >      guest that never learns a frame arrived will not read it.
+  >
+  > The diagnostic that found this is `crates/dome-cli/tests/net_probe.rs`, ignored rather than
+  > removed so it is one `--ignored` away from answering the question again.
+  > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool.
+  >    Blocked behind 4, which is blocked behind the interrupt work.
   >
   > **Must NOT do**:
   > - Do not trust a length field from the guest without checking it against the buffer.

@@ -42,7 +42,7 @@ fn main() {
             // what a single-process chamber wants.
             use std::os::unix::process::CommandExt;
             let error = std::process::Command::new(&path).arg0(&path).exec();
-            say(&format!("dome-init: cannot execute {path}: {error}"));
+            say(&format!("cannot execute {path}: {error}"));
             halt(127);
         }
         None => {
@@ -110,7 +110,7 @@ fn run_bootstrap() {
         match line.split_once('=') {
             Some(("url", value)) => url = Some(value.to_owned()),
             Some(("manager", name)) => {
-                say(&format!("dome-init: installing {name}"));
+                say(&format!("installing {name}"));
             }
             _ => {}
         }
@@ -121,7 +121,7 @@ fn run_bootstrap() {
         return;
     };
 
-    say(&format!("dome-init: fetching {url}"));
+    say(&format!("fetching {url}"));
 
     let fetched = std::process::Command::new("/usr/bin/dome-fetch")
         .arg(&url)
@@ -149,8 +149,8 @@ fn run_bootstrap() {
         .arg("/run/installer")
         .status()
     {
-        Ok(status) => say(&format!("dome-init: installer finished: {status}")),
-        Err(error) => say(&format!("dome-init: cannot run /bin/sh: {error}")),
+        Ok(status) => say(&format!("installer finished: {status}")),
+        Err(error) => say(&format!("cannot run /bin/sh: {error}")),
     }
 
     let _ = std::fs::remove_file("/etc/dome/bootstrap");

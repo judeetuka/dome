@@ -1,0 +1,14 @@
+# probing a real kernel for network support
+# command: cargo test -p dome-cli --test net_probe -- --ignored --nocapture
+
+# what the kernel log showed:
+#   Command line: console=ttyS0 earlyprintk=ttyS0 panic=1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off
+#   frames from guest: 0
+#
+# i.e. the guest never probed the device. Linux on x86 has no device tree, so virtio-mmio
+# windows must be named on the command line:
+#   virtio_mmio.device=0x1000@0xd0000000:<irq>
+# and even then the driver wants an interrupt, which the transport does not raise yet.
+
+# also learned: a foundation with only bash and no coreutils cannot run a probe script that
+# calls mount, zcat or ls. A diagnostic has to be written in builtins or ship its tools.
