@@ -125,7 +125,16 @@ pub trait VirtioBackend {
     fn write_config(&mut self, offset: u64, data: &[u8]);
 
     /// The driver rang the doorbell for a queue. Returns whether an interrupt is owed.
-    fn notify(&mut self, queue: u16) -> bool;
+    ///
+    /// Memory is handed over rather than stored because a device never owns the guest's RAM: it
+    /// borrows a view for the duration of one notification. That is also why the transport cannot
+    /// service a doorbell itself - it does not have the memory, the engine does.
+    fn notify(
+        &mut self,
+        queue: u16,
+        state: QueueState,
+        memory: &crate::memory::GuestMemory,
+    ) -> bool;
 }
 
 /// State of one queue as the driver configured it.
@@ -154,6 +163,7 @@ pub struct VirtioMmio<B: VirtioBackend> {
     queue_sel: u16,
     queues: Vec<QueueState>,
     interrupt_status: u8,
+    pending_doorbell: Option<u16>,
 }
 
 impl<B: VirtioBackend> VirtioMmio<B> {
@@ -169,6 +179,7 @@ impl<B: VirtioBackend> VirtioMmio<B> {
             queue_sel: 0,
             queues: vec![QueueState::default(); 4],
             interrupt_status: 0,
+            pending_doorbell: None,
         }
     }
 
@@ -300,10 +311,9 @@ impl<B: VirtioBackend> VirtioMmio<B> {
                 }
             }
             reg::QUEUE_NOTIFY => {
-                let owes_interrupt = self.backend.notify(value as u16);
-                if owes_interrupt {
-                    self.interrupt_status |= interrupt::USED_BUFFER;
-                }
+                // Deferred: the backend needs guest memory to do anything with a queue, and the
+                // transport does not have it. The engine services this after the exit.
+                self.pending_doorbell = Some(value as u16);
             }
             reg::INTERRUPT_ACK => self.interrupt_status &= !(value as u8),
             reg::STATUS => self.write_status(value as u8),
@@ -410,6 +420,25 @@ impl<B: VirtioBackend + 'static> Device for VirtioMmio<B> {
         let mut value = [0u8; 4];
         copy_into(data, &mut value);
         self.write_u32(offset, u32::from_le_bytes(value));
+    }
+    fn take_doorbell(&mut self) -> Option<u16> {
+        self.pending_doorbell.take()
+    }
+
+    fn service_doorbell(&mut self, queue: u16, memory: &crate::memory::GuestMemory) {
+        let state = self
+            .queues
+            .get(usize::from(queue))
+            .copied()
+            .unwrap_or_default();
+
+        if !state.ready {
+            return;
+        }
+
+        if self.backend.notify(queue, state, memory) {
+            self.interrupt_status |= interrupt::USED_BUFFER;
+        }
     }
 }
 

@@ -8,16 +8,19 @@ use dome_core::MemorySize;
 use dome_engine::EngineError;
 use dome_engine::devices::uart16550::{SERIAL_MMIO_BASE, Uart16550};
 use dome_engine::devices::virtio_mmio::{
-    Descriptor, MAGIC, QUEUE_NUM_MAX, VERSION, VirtioBackend, VirtioMmio, reg, status,
+    Descriptor, MAGIC, QUEUE_NUM_MAX, QueueState, VERSION, VirtioBackend, VirtioMmio, reg, status,
 };
 use dome_engine::devices::{ChamberIo, Device, DeviceSet, VIRTIO_MMIO_BASE, read_descriptor};
 use dome_engine::memory::GuestMemory;
 use dome_engine::vcpu::VcpuIo;
+use vm_memory::Bytes;
 
 struct FakeBackend {
     notifies: Vec<u16>,
     config: Vec<u8>,
     features: u64,
+    last_queue: Option<QueueState>,
+    last_buffer: Vec<u8>,
 }
 
 impl FakeBackend {
@@ -26,6 +29,8 @@ impl FakeBackend {
             notifies: Vec::new(),
             config: vec![0u8; 8],
             features: 0b1010,
+            last_queue: None,
+            last_buffer: Vec::new(),
         }
     }
 }
@@ -57,8 +62,21 @@ impl VirtioBackend for FakeBackend {
         }
     }
 
-    fn notify(&mut self, queue: u16) -> bool {
+    fn notify(&mut self, queue: u16, state: QueueState, memory: &GuestMemory) -> bool {
         self.notifies.push(queue);
+        self.last_queue = Some(state);
+        // Prove the backend can actually reach guest memory from a notification: read the first
+        // descriptor in the chain and keep what it points at.
+        if let Ok(descriptor) = read_descriptor(memory, state.descriptor_table, 0) {
+            let mut buffer = vec![0u8; descriptor.length as usize];
+            if memory
+                .map()
+                .read_slice(&mut buffer, vm_memory::GuestAddress(descriptor.address))
+                .is_ok()
+            {
+                self.last_buffer = buffer;
+            }
+        }
         true
     }
 }
@@ -256,9 +274,19 @@ fn queue_addresses_are_assembled_from_low_and_high_words() {
 
 #[test]
 fn a_doorbell_reaches_the_backend_and_raises_an_interrupt() {
+    let memory = GuestMemory::allocate(MemorySize::from_mib(16).expect("16 MiB")).expect("memory");
     let mut device = transport();
 
+    // Configure the queue the way a driver does before ringing: without a ready queue there is
+    // nothing for the device to walk.
+    device.write_u32(reg::QUEUE_SEL, 1);
+    device.write_u32(reg::QUEUE_NUM, 8);
+    device.write_u32(reg::QUEUE_READY, 1);
+
     device.write_u32(reg::QUEUE_NOTIFY, 1);
+    // The transport cannot service this itself: it has no memory. The engine does.
+    let queue = device.take_doorbell().expect("a doorbell is pending");
+    device.service_doorbell(queue, &memory);
 
     assert_eq!(device.backend().notifies, vec![1]);
     assert_eq!(
@@ -385,4 +413,59 @@ fn the_chamber_io_ignores_memory_no_device_owns() {
     // Writing into unmapped space must be harmless rather than a panic.
     io.mmio_write(0xdead_beef, b"x");
     assert_eq!(io.console_text(), "");
+}
+
+#[test]
+fn a_backend_reaches_guest_memory_when_the_doorbell_rings() {
+    // The point of the deferred doorbell: a device never holds memory, but it gets a view for
+    // exactly one notification. This is what a network device needs to read a frame.
+    let memory = GuestMemory::allocate(MemorySize::from_mib(16).expect("16 MiB")).expect("memory");
+    let mut device = transport();
+
+    // Descriptor table at 0x10000, one descriptor pointing at a buffer at 0x20000.
+    let table = 0x1_0000u64;
+    let buffer = 0x2_0000u64;
+    let payload = b"ethernet frame".to_vec();
+
+    let descriptor = Descriptor {
+        address: buffer,
+        length: payload.len() as u32,
+        flags: 0,
+        next: 0,
+    };
+
+    let mut bytes = Vec::with_capacity(16);
+    bytes.extend_from_slice(&descriptor.address.to_le_bytes());
+    bytes.extend_from_slice(&descriptor.length.to_le_bytes());
+    bytes.extend_from_slice(&descriptor.flags.to_le_bytes());
+    bytes.extend_from_slice(&descriptor.next.to_le_bytes());
+    memory
+        .map()
+        .write_slice(&bytes, vm_memory::GuestAddress(table))
+        .expect("descriptor");
+    memory
+        .map()
+        .write_slice(&payload, vm_memory::GuestAddress(buffer))
+        .expect("payload");
+
+    device.write_u32(reg::QUEUE_SEL, 0);
+    device.write_u32(reg::QUEUE_NUM, 8);
+    device.write_u32(reg::QUEUE_DESC_LOW, table as u32);
+    device.write_u32(reg::QUEUE_READY, 1);
+
+    device.write_u32(reg::QUEUE_NOTIFY, 0);
+    let queue = device.take_doorbell().expect("pending");
+    device.service_doorbell(queue, &memory);
+
+    let backend = device.backend();
+    assert_eq!(backend.notifies, vec![0]);
+    assert_eq!(
+        backend.last_buffer, payload,
+        "the backend read the guest buffer the descriptor pointed at"
+    );
+    assert_eq!(
+        backend.last_queue.map(|state| state.ready),
+        Some(true),
+        "the backend was given the queue state too"
+    );
 }

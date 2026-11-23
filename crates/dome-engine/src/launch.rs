@@ -217,7 +217,11 @@ impl LinuxEngine {
                     stopped = true;
                     break;
                 }
-                Ok(VcpuStop::Continue) => {}
+                Ok(VcpuStop::Continue) => {
+                    // A write may have rung a doorbell; only this loop has the memory a device
+                    // needs to act on it.
+                    io.service_pending(&memory);
+                }
                 Err(EngineError::Launch(message)) if message.contains("Interrupted") => {
                     // KVM_RUN returned EINTR: the watch dog interrupted this exact thread.
                     timed_out = true;

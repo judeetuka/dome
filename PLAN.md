@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 400 tests passing
+**Verified state of the tree**: 401 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4055,8 +4055,14 @@ Max Concurrent: 6 (M1 wave)
   > chose to send.
   >
   > **Owed**:
-  > 1. the transport must give backends guest memory. `VirtioBackend::notify` takes a queue
+  > 1. ~~the transport must give backends guest memory~~ - **done**, see below. `VirtioBackend::notify` takes a queue
   >    number and nothing else, so no backend can read a descriptor today
+  > **Step 1 done**: the doorbell is deferred. `VirtioBackend::notify` now receives the queue
+  > state and a view of guest memory, and the transport only records which queue was rung; the
+  > launch loop services it, because it is the only thing that owns the memory. A device holding a
+  > permanent memory reference would alias the engine's mapping, which is the bug this avoids.
+  > Tested with a backend that walks a descriptor chain and reads the buffer it points at.
+  >
   > 2. a virtio-net device: two queues, a MAC in config space, the feature bits the kernel wants
   > 3. user-mode NAT: answer ARP, echo ICMP, proxy DNS, and relay TCP through host sockets
   > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP

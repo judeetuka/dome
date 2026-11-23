@@ -50,12 +50,25 @@ pub trait Device {
     fn console(&self) -> Option<&[u8]> {
         None
     }
+
+    /// A queue the guest just rang, to be serviced by whoever owns guest memory.
+    ///
+    /// Devices do not hold a memory view: one notification is the only moment a device needs to
+    /// look at RAM, and giving it a permanent reference would mean the engine and the device both
+    /// alias the same mapping.
+    fn take_doorbell(&mut self) -> Option<u16> {
+        None
+    }
+
+    /// Service a doorbell with a view of guest memory.
+    fn service_doorbell(&mut self, _queue: u16, _memory: &GuestMemory) {}
 }
 
 /// The devices attached to one chamber.
 #[derive(Default)]
 pub struct DeviceSet {
     devices: Vec<Box<dyn Device>>,
+    pending: Vec<(usize, u16)>,
 }
 
 impl DeviceSet {
@@ -67,6 +80,20 @@ impl DeviceSet {
     /// Attach a device.
     pub fn add(&mut self, device: Box<dyn Device>) {
         self.devices.push(device);
+    }
+
+    /// Service every doorbell rung since the last call.
+    pub fn service_pending(&mut self, memory: &GuestMemory) {
+        while let Some((index, queue)) = self.pending.pop() {
+            if let Some(device) = self.devices.get_mut(index) {
+                device.service_doorbell(queue, memory);
+            }
+        }
+    }
+
+    /// Whether a doorbell is waiting to be serviced.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     /// How many devices are attached.
@@ -92,12 +119,28 @@ impl DeviceSet {
 
     /// Route a guest write, returning whether any device claimed the address.
     pub fn mmio_write(&mut self, address: u64, data: &[u8]) -> bool {
-        let Some((device, offset)) = self.route(address) else {
+        let Some(index) = self.index_of(address) else {
             return false;
         };
 
-        device.mmio_write(offset, data);
+        let offset = address - self.devices[index].mmio_range().0;
+        self.devices[index].mmio_write(offset, data);
+
+        // A write may have rung a doorbell. Recording the index rather than a reference keeps the
+        // device list borrowable while the engine services it with memory.
+        if let Some(queue) = self.devices[index].take_doorbell() {
+            self.pending.push((index, queue));
+        }
+
         true
+    }
+
+    /// Which device claims an address.
+    fn index_of(&self, address: u64) -> Option<usize> {
+        self.devices.iter().position(|device| {
+            let (base, length) = device.mmio_range();
+            address >= base && address < base.saturating_add(length)
+        })
     }
 
     /// Everything the guest has written to the console, whichever path it used.
@@ -213,6 +256,11 @@ impl ChamberIo {
     /// The device set, for attaching more.
     pub fn devices_mut(&mut self) -> &mut DeviceSet {
         &mut self.devices
+    }
+
+    /// Service doorbells rung during the last exit.
+    pub fn service_pending(&mut self, memory: &GuestMemory) {
+        self.devices.service_pending(memory);
     }
 
     /// Everything the guest has written to the console.

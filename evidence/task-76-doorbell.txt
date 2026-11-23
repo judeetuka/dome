@@ -1,0 +1,10 @@
+# a device can reach guest memory, one notification at a time
+# command: cargo test -p dome-engine --test devices -j4
+
+a_doorbell_reaches_the_backend_and_raises_an_interrupt ... ok
+a_backend_reaches_guest_memory_when_the_doorbell_rings ... ok
+test result: ok. 21 passed
+
+# before: notify(queue) - the transport called the backend directly, so the backend could
+#         only learn that a queue had been rung, never look at what was in it.
+# after:  the transport records the ringing queue, the launch loop services it with memory.
