@@ -1,0 +1,10 @@
+# access points: design recorded in docs/adr/0006-access-points.md
+# socket relay, against real sockets:
+#   cargo test -p dome-supervisor --lib
+
+user_net::tests::a_connection_is_relayed_both_ways ... ok
+user_net::tests::an_isolated_relay_opens_nothing ... ok
+user_net::tests::a_resolver_forwards_the_query_and_returns_the_answer ... ok
+
+# the relays use a real TcpListener and a real UdpSocket on 127.0.0.1: no network required,
+# no mocking of the socket API.

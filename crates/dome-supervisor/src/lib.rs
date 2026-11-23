@@ -7,6 +7,7 @@ pub mod registry;
 pub mod relay;
 pub mod restart;
 pub mod state;
+pub mod user_net;
 
 use dome_core::ChamberId;
 
