@@ -1,0 +1,18 @@
+# a real kernel finds the device, and then has no driver for it
+# command: cargo test -p dome-cli --test net_probe -j4 -- --nocapture
+
+test the_kernel_probes_the_network_and_configures_the_address_from_the_command_line ... ok
+
+# console:
+#   Kernel command line: console=ttyS0 earlyprintk=ttyS0 panic=1 virtio_mmio.device=4096@0xd0000000:5
+#   virtio-mmio: Registering device virtio-mmio.0 at 0xd0000000-0xd0000fff, IRQ 5.
+#   Run /init as init process
+#   dome-init: starting as pid 1
+#   frames from guest: 0
+
+# two things learned the hard way:
+# 1. x86 Linux has no device tree, so a virtio-mmio window that is not named on the command
+#    line is never probed. The device was attached and invisible.
+# 2. the fixture kernel ships virtio_net as a MODULE, so it registers the device and has no
+#    driver to bind: no eth0, no frames, and ip= hangs waiting for an interface that will never
+#    appear. That is an argument for the kernel Dome ships: drivers built in, no modules.

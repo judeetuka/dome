@@ -64,6 +64,20 @@ pub trait Device {
 
     /// Service a doorbell with a view of guest memory.
     fn service_doorbell(&mut self, _queue: u16, _memory: &GuestMemory) {}
+
+    /// The virtio-mmio window this device answers on, if it is one.
+    ///
+    /// Linux on x86 has no device tree, so a virtio-mmio window has to be named on the kernel
+    /// command line or it is never probed. That makes this the engine's only way to tell a guest
+    /// the device exists at all.
+    fn virtio_window(&self) -> Option<(u64, u64)> {
+        None
+    }
+
+    /// Whether the device is asserting an interrupt the guest has not acknowledged.
+    fn interrupt_pending(&self) -> bool {
+        false
+    }
 }
 
 /// The devices attached to one chamber.
@@ -96,6 +110,23 @@ impl DeviceSet {
     /// Whether a doorbell is waiting to be serviced.
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
+    }
+
+    /// The virtio-mmio windows in the set, in address order.
+    pub fn virtio_windows(&self) -> Vec<(u64, u64)> {
+        let mut windows: Vec<(u64, u64)> = self
+            .devices
+            .iter()
+            .filter_map(|device| device.virtio_window())
+            .collect();
+
+        windows.sort();
+        windows
+    }
+
+    /// Whether any device is asserting an interrupt.
+    pub fn interrupt_pending(&self) -> bool {
+        self.devices.iter().any(|device| device.interrupt_pending())
     }
 
     /// How many devices are attached.
@@ -278,6 +309,16 @@ impl ChamberIo {
     /// Service doorbells rung during the last exit.
     pub fn service_pending(&mut self, memory: &GuestMemory) {
         self.devices.service_pending(memory);
+    }
+
+    /// The virtio-mmio windows this chamber exposes.
+    pub fn virtio_windows(&self) -> Vec<(u64, u64)> {
+        self.devices.virtio_windows()
+    }
+
+    /// Whether a device is asserting an interrupt.
+    pub fn interrupt_pending(&self) -> bool {
+        self.devices.interrupt_pending()
     }
 
     /// Everything the guest has written to the console.

@@ -29,7 +29,7 @@ fn main() {
     });
 
     say(&format!(
-        "dome-init: starting as pid 1{}",
+        "starting as pid 1{}",
         match &workload {
             Some(path) => format!(", then handing over to {path}"),
             None => String::new(),
@@ -46,7 +46,7 @@ fn main() {
             halt(127);
         }
         None => {
-            say("dome-init: nothing to run, staying alive");
+            say("nothing to run, staying alive");
             // Sleeping rather than exiting: the kernel panics if pid 1 exits, and a panic would
             // look like a failure when the boot actually succeeded.
             loop {
@@ -117,7 +117,7 @@ fn run_bootstrap() {
     }
 
     let Some(url) = url else {
-        say("dome-init: no installer URL recorded; nothing to install");
+        say("no installer URL recorded; nothing to install");
         return;
     };
 
@@ -131,15 +131,11 @@ fn run_bootstrap() {
     match fetched {
         Ok(status) if status.success() => {}
         Ok(status) => {
-            say(&format!(
-                "dome-init: fetching the installer failed: {status}"
-            ));
+            say(&format!("fetching the installer failed: {status}"));
             return;
         }
         Err(error) => {
-            say(&format!(
-                "dome-init: cannot run /usr/bin/dome-fetch: {error}"
-            ));
+            say(&format!("cannot run /usr/bin/dome-fetch: {error}"));
             return;
         }
     }

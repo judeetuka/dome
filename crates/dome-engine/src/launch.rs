@@ -116,6 +116,74 @@ pub struct BootOutcome {
     pub captured: Option<CapturedState>,
 }
 
+/// The interrupt number virtio devices are announced with.
+///
+/// A GSI, not an ISA IRQ: the guest's driver registers a handler for whatever number it is told,
+/// and KVM injects on the same number through an irqfd.
+pub const VIRTIO_GSI: u32 = 5;
+
+/// Append the kernel parameters that make virtio-mmio windows discoverable.
+fn announce_devices(cmdline: &str, io: &ChamberIo) -> String {
+    let mut effective = cmdline.to_owned();
+
+    for (base, size) in io.virtio_windows() {
+        let parameter = format!("virtio_mmio.device={size}@{base:#x}:{VIRTIO_GSI}");
+
+        if !effective.contains("virtio_mmio.device=") {
+            effective.push(' ');
+            effective.push_str(&parameter);
+        }
+    }
+
+    effective
+}
+
+/// A level-triggered interrupt line backed by an irqfd.
+///
+/// Level-triggered means the guest is not told twice until it has acknowledged the first one, and
+/// KVM reports that acknowledgement by signalling the resample eventfd. Raising without waiting is
+/// how a device ends up in an interrupt storm.
+struct InterruptLine {
+    assert: vmm_sys_util::eventfd::EventFd,
+    resample: vmm_sys_util::eventfd::EventFd,
+    ready: bool,
+}
+
+impl InterruptLine {
+    fn register(vm: &kvm_ioctls::VmFd) -> Result<Self, EngineError> {
+        let assert = vmm_sys_util::eventfd::EventFd::new(0)
+            .map_err(|error| EngineError::Setup(format!("cannot create eventfd: {error}")))?;
+        // Non-blocking: the line asks "has the guest acknowledged" every exit, and a blocking
+        // read there would stop the chamber dead the first time it had nothing to say.
+        let resample = vmm_sys_util::eventfd::EventFd::new(libc::EFD_NONBLOCK)
+            .map_err(|error| EngineError::Setup(format!("cannot create eventfd: {error}")))?;
+
+        vm.register_irqfd_with_resample(&assert, &resample, VIRTIO_GSI)
+            .map_err(|error| EngineError::Setup(format!("cannot register the irqfd: {error}")))?;
+
+        Ok(Self {
+            assert,
+            resample,
+            ready: true,
+        })
+    }
+
+    /// Raise the line if the device is asking and the guest has acknowledged the last one.
+    fn service(&mut self, pending: bool) {
+        if self.resample.read().is_ok() {
+            self.ready = true;
+        }
+
+        if pending && self.ready {
+            // If the write fails the guest will not hear about this one; the next one is still
+            // attempted, because a dropped interrupt is not a reason to stop serving.
+            if self.assert.write(1).is_ok() {
+                self.ready = false;
+            }
+        }
+    }
+}
+
 impl LinuxEngine {
     /// Boot a kernel in a fresh VM and return what it printed.
     ///
@@ -179,13 +247,12 @@ impl LinuxEngine {
             None => None,
         };
 
-        let zero_page = write_zero_page(
-            &memory,
-            header,
-            &request.cmdline,
-            initrd,
-            MIN_KERNEL_ADDRESS,
-        )?;
+        // Linux on x86 has no device tree, so a virtio-mmio window has to be named by the kernel
+        // command line. Without this the device exists and is never probed, which is a silent
+        // failure: boot succeeds and the guest simply has no network.
+        let cmdline = announce_devices(&request.cmdline, &io);
+
+        let zero_page = write_zero_page(&memory, header, &cmdline, initrd, MIN_KERNEL_ADDRESS)?;
 
         let mut vcpu = Vcpu::create(
             self.kvm(),
@@ -196,6 +263,14 @@ impl LinuxEngine {
                 boot_params: zero_page.0,
             },
         )?;
+
+        // A device that has something to say needs a way to say it. One eventfd is the line, the
+        // other is the resample KVM signals when the guest acknowledges, which is what lets a
+        // level-triggered line be raised again afterwards.
+        let mut interrupt_line = None;
+        if !io.virtio_windows().is_empty() {
+            interrupt_line = Some(InterruptLine::register(&vm)?);
+        }
 
         // The cage goes on after everything is prepared and before anything runs, so the
         // guest executes inside it rather than having it applied retroactively.
@@ -233,6 +308,10 @@ impl LinuxEngine {
                     // A write may have rung a doorbell; only this loop has the memory a device
                     // needs to act on it.
                     io.service_pending(&memory);
+
+                    if let Some(line) = interrupt_line.as_mut() {
+                        line.service(io.interrupt_pending());
+                    }
                 }
                 Err(EngineError::Launch(message)) if message.contains("Interrupted") => {
                     // KVM_RUN returned EINTR: the watch dog interrupted this exact thread.

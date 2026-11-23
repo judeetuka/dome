@@ -425,6 +425,14 @@ impl<B: VirtioBackend + 'static> Device for VirtioMmio<B> {
         self.pending_doorbell.take()
     }
 
+    fn virtio_window(&self) -> Option<(u64, u64)> {
+        Some((self.base, crate::devices::VIRTIO_MMIO_SIZE))
+    }
+
+    fn interrupt_pending(&self) -> bool {
+        self.interrupt_status != 0
+    }
+
     fn service_doorbell(&mut self, queue: u16, memory: &crate::memory::GuestMemory) {
         let state = self
             .queues

@@ -42,7 +42,6 @@ impl NetworkBackend for Recorder {
 }
 
 #[test]
-#[ignore = "the kernel does not probe virtio-mmio on x86 without a virtio_mmio.device= parameter, and device-to-guest signalling needs the irqfd work in T76"]
 fn the_kernel_probes_the_network_and_configures_the_address_from_the_command_line() {
     let root = workspace_root();
     let kernel = root.join("tests/fixtures/kernel/vmlinuz-virt");
@@ -75,10 +74,11 @@ fn the_kernel_probes_the_network_and_configures_the_address_from_the_command_lin
         .with_initramfs(&initramfs);
 
     // The kernel reads this itself if it was built with CONFIG_IP_PNP.
-    request.cmdline =
-        "console=ttyS0 earlyprintk=ttyS0 panic=1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off"
-            .to_owned();
-    request.timeout = Duration::from_secs(8);
+    // The command line is plain: no ip= parameter, so the only new thing in this boot is the
+    // device itself.
+    request.cmdline = "console=ttyS0 earlyprintk=ttyS0 panic=1".to_owned();
+    // The boot reaches init in about a second; the rest waits for nothing in particular.
+    request.timeout = Duration::from_secs(5);
 
     let recorder = Recorder::default();
     let frames = Arc::clone(&recorder.frames);

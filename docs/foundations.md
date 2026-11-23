@@ -146,6 +146,29 @@ The boot order that follows:
 The host contributes the kernel, the init, the shell and the fetcher - all static, all resolved from
 profiles. It contributes no packages, no toolchain, and no libraries.
 
+### The kernel is Dome's, and the test fixture is not
+
+Dome builds its own kernel. It is not a distribution kernel and it carries no modules: everything
+the device set needs is compiled in, because a module is a file someone has to put somewhere and a
+version someone has to match, and a foundation that depends on that is a foundation that breaks
+when the kernel moves.
+
+Until that build exists (T31), tests boot `tests/fixtures/kernel/vmlinuz-virt`, which is an
+Alpine kernel. **It is a fixture, not a decision**, and it has already cost us time: its
+`virtio_net` is a module, so a chamber built on it registers the network device and then has no
+driver to bind. The engine is correct and the fixture cannot show it.
+
+| What a kernel must have built in | Why |
+| --- | --- |
+| `virtio_mmio` | the transport, and it must be told the window on the command line |
+| `virtio_net` | otherwise a chamber has a device with no driver, as the fixture does |
+| `ip=` support (`CONFIG_IP_PNP`) | static addressing without a DHCP client in userspace |
+| `DEVTMPFS` (+ mount at boot) | otherwise `/dev/console` does not exist and init's output is lost |
+| `BINFMT_SCRIPT` | otherwise a `#!` script cannot be init or workload |
+
+That table is the kernel profile fragment T31 has to produce, and every row came from something
+that failed during M5 rather than from a specification.
+
 ### The kernel comes from a profile, not from the command line
 
 A user names a profile; the profile resolves to an image on this host. Nobody passes a kernel

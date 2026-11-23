@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 425 tests passing
+**Verified state of the tree**: 426 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -2631,9 +2631,14 @@ Max Concurrent: 6 (M1 wave)
   > `$XDG_DATA_HOME/dome/kernels/<name>/vmlinuz`, validating the boot signature. `dome build`
   > resolves it, so no user ever passes a kernel path; `--kernel` remains as a hidden override.
   >
-  > What is still owed is producing those images: a kernel config fragment with the device set
-  > compiled in, and a build that runs it. That needs a kernel source tree, which this host does
-  > not have.
+  > What is still owed is producing those images: a kernel config fragment and a build that runs
+  > it. That needs a kernel source tree, which this host does not have.
+  >
+  > The fragment is no longer guesswork. M5 produced it by failing:
+  > `CONFIG_VIRTIO_MMIO=y`, `CONFIG_VIRTIO_NET=y`, `CONFIG_IP_PNP=y` (and IP_PNP_DHCP off),
+  > `CONFIG_DEVTMPFS=y` with `CONFIG_DEVTMPFS_MOUNT=y`, `CONFIG_BINFMT_SCRIPT=y`. The fixture
+  > kernel has the first and the last, ships the second as a module, and hangs on `ip=` because
+  > the interface never appears.
 
   **Acceptance Criteria**:
   - [ ] Each fragment merges without conflict with x86_64 defconfig
@@ -4119,6 +4124,10 @@ Max Concurrent: 6 (M1 wave)
   >    carries frames both ways. A request leaves and the answer comes back, over a real server.
   >    Remaining: the guest-side addressing, and a real kernel behind it.
   > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP.
+  >    **Solved on the host side**: the engine now announces each virtio-mmio window on the
+  >    command line (`virtio_mmio.device=4096@0xd0000000:5`) and raises an irqfd-backed
+  >    level-triggered interrupt, and a real kernel answers `virtio-mmio: Registering device
+  >    virtio-mmio.0 at 0xd0000000-0xd0000fff, IRQ 5`.
   >    **Two blockers found by probing a real kernel**, and both were predictable:
   >    - Linux on x86 does **not** probe virtio-mmio devices by itself. There is no device tree, so
   >      each window has to be named on the command line: `virtio_mmio.device=0x1000@0xd0000000:`<irq>
@@ -4130,8 +4139,11 @@ Max Concurrent: 6 (M1 wave)
   >
   > The diagnostic that found this is `crates/dome-cli/tests/net_probe.rs`, ignored rather than
   > removed so it is one `--ignored` away from answering the question again.
-  > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool.
-  >    Blocked behind 4, which is blocked behind the interrupt work.
+  > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a
+  >    tool. **Blocked by the fixture kernel**: it registers the device and then has no
+  >    `virtio_net` driver, because Alpine ships that as a module. The engine side is done; the
+  >    remaining dependency is T31 - a kernel with the drivers compiled in, which is what Dome
+  >    ships anyway.
   >
   > **Must NOT do**:
   > - Do not trust a length field from the guest without checking it against the buffer.
