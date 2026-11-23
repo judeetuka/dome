@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 373 tests passing
+**Verified state of the tree**: 378 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -2598,47 +2598,16 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
-- [ ] 30. **Alpine Developer Foundation Recipe**
+- [ ] 30. **Toolchain Foundations from mise** (was: Alpine developer foundation)
 
-  **What to do**:
-  - Create `foundations/alpine/` directory with:
-    - `build.sh` — uses Alpine's `apk` to create a developer rootfs
-    - Includes: bash, coreutils, gcc, make, git, strace, gdb
-    - Target: ~200 MiB, suitable for development chambers
-  - Document Alpine version and `apk` prerequisites
-  - Kernel profile fragment for developer use (debug symbols, KASAN, lockdep)
+  > **Retargeted.** The Alpine recipe is dropped: no distribution base is wanted. A foundation
+  > that can build software gets its toolchains from [mise](https://mise.jdx.dev), which installs
+  > self-contained directories needing no root, no system package manager and no base image.
+  >
+  > The recipe model already accepts `mise:node@20`, `mise:rust@1.95` as a package source, and
+  > `[build]` packages are dropped before the release. What is missing is the copy step: resolve
+  > the toolchain with mise and place it in the image.
 
-  > Alpine is one recipe, not a dependency of the design. It exists because compiling needs a
-  > compiler and a package manager, which is most of what a distribution is for; the minimal
-  > recipe covers everything that does not need that.
-
-  **Must NOT do**:
-  - Do not implement Alpine package management — use `apk` directly
-  - Do not include proprietary software in the developer foundation
-
-  **Recommended Agent Profile**: `unspecified-high`
-  **Parallelization**: Can Run In Parallel YES with T29, T31 | Blocks: T32 | Blocked By: M4 complete
-
-  **Acceptance Criteria**:
-  - [ ] `build.sh` produces a developer `.foundation.dome`
-  - [ ] Foundation includes gcc, make, git, strace, gdb
-  - [ ] Foundation boots and provides a working shell
-
-  **QA Scenarios**:
-
-  ```
-  Scenario: Alpine developer foundation builds
-    Tool: Bash
-    Steps:
-      1. cd foundations/alpine && ./build.sh
-      2. Assert: output .foundation.dome exists
-    Expected Result: Developer foundation built
-    Evidence: evidence/task-30-alpine.txt
-  ```
-
-  **Commit**: NO (groups with T29, T31)
-
----
 
 - [ ] 31. **Kernel Profile Fragments**
 
@@ -2656,6 +2625,15 @@ Max Concurrent: 6 (M1 wave)
 
   **Recommended Agent Profile**: `unspecified-high` — kernel config expertise
   **Parallelization**: Can Run In Parallel YES with T29, T30 | Blocks: T32 | Blocked By: M4 complete
+
+  > **Resolution is done; building is not.** A profile is what a recipe names, and
+  > `dome kernel import --profile <name> --from <bzImage>` installs one under
+  > `$XDG_DATA_HOME/dome/kernels/<name>/vmlinuz`, validating the boot signature. `dome build`
+  > resolves it, so no user ever passes a kernel path; `--kernel` remains as a hidden override.
+  >
+  > What is still owed is producing those images: a kernel config fragment with the device set
+  > compiled in, and a build that runs it. That needs a kernel source tree, which this host does
+  > not have.
 
   **Acceptance Criteria**:
   - [ ] Each fragment merges without conflict with x86_64 defconfig

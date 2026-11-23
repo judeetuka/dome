@@ -7,6 +7,7 @@ use dome_host_linux::{HostReport, ProbeRoot};
 
 pub mod chambers;
 pub mod foundation_build;
+pub mod kernel;
 pub mod packaging;
 pub mod release;
 
@@ -141,6 +142,12 @@ enum Commands {
         captured_on: String,
     },
 
+    /// Manage kernel profiles
+    Kernel {
+        #[command(subcommand)]
+        action: KernelAction,
+    },
+
     /// Generate the keys a release needs
     Keygen {
         /// Directory to write the keys into
@@ -192,8 +199,8 @@ enum Commands {
         /// List the available recipe files in the workspace
         #[arg(long)]
         list: bool,
-        /// The kernel to ship
-        #[arg(long, value_name = "BZIMAGE")]
+        /// A kernel image to use instead of the recipe's profile (development override)
+        #[arg(long, value_name = "BZIMAGE", hide = true)]
         kernel: Option<PathBuf>,
         /// Where the foundation directory goes
         #[arg(long, value_name = "DIR")]
@@ -218,6 +225,22 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum KernelAction {
+    /// Install a kernel image under a profile name
+    Import {
+        /// Profile name, for example dome-minimal
+        #[arg(long, value_name = "NAME")]
+        profile: String,
+        /// The kernel image to install
+        #[arg(long, value_name = "BZIMAGE")]
+        from: PathBuf,
+    },
+
+    /// List installed profiles
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -441,6 +464,23 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             release::release(&options).map_err(CliError::Failed)
         }
 
+        Commands::Kernel { action } => match action {
+            KernelAction::Import { profile, from } => {
+                kernel::import(&kernel::kernel_root(), &profile, &from).map_err(CliError::Failed)
+            }
+            KernelAction::List => {
+                let profiles = kernel::list(&kernel::kernel_root()).map_err(CliError::Failed)?;
+                if profiles.is_empty() {
+                    Ok("no kernel profiles installed".to_owned())
+                } else {
+                    Ok(profiles
+                        .into_iter()
+                        .map(|profile| format!("{profile}\n"))
+                        .collect())
+                }
+            }
+        },
+
         Commands::Keygen { out } => {
             let files = release::KeyFiles::in_dir(&out);
             files.generate().map_err(CliError::Failed)?;
@@ -483,15 +523,17 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
                 );
             }
 
-            let (Some(recipe), Some(kernel), Some(output)) = (recipe, kernel, output) else {
+            let (Some(recipe), Some(output)) = (recipe, output) else {
                 return Err(CliError::Usage(
-                    "build needs --recipe <toml>, --kernel <bzImage> and --output <dir>".to_owned(),
+                    "build needs --recipe <toml> and --output <dir>; the recipe names its kernel profile"
+                        .to_owned(),
                 ));
             };
 
             foundation_build::build(&foundation_build::BuildOptions {
                 recipe,
                 kernel,
+                kernel_root: kernel::kernel_root(),
                 output,
                 init,
                 workload,

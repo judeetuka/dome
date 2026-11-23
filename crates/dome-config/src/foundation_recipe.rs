@@ -26,6 +26,11 @@ pub enum PackageSource {
     Pacman,
     /// yay, the AUR through pacman's interface.
     Yay,
+    /// mise, which installs self-contained toolchains with no root and no distribution.
+    ///
+    /// This is the source that fits Dome's model best: a mise toolchain is a directory, so it
+    /// can be copied into an image as-is, and it needs no base system to exist first.
+    Mise,
 }
 
 impl PackageSource {
@@ -36,6 +41,7 @@ impl PackageSource {
             "apk" => Self::Apk,
             "pacman" => Self::Pacman,
             "yay" | "aur" => Self::Yay,
+            "mise" => Self::Mise,
             _ => return None,
         })
     }
@@ -47,6 +53,7 @@ impl PackageSource {
             Self::Apk => "apk",
             Self::Pacman => "pacman",
             Self::Yay => "yay",
+            Self::Mise => "mise",
         }
     }
 }

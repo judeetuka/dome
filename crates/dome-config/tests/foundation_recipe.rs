@@ -432,3 +432,25 @@ fn mixed_managers_survive_into_the_plan() {
             .contains(&"yay:neovim-git@0.10".to_owned())
     );
 }
+
+#[test]
+fn mise_is_a_package_source() {
+    // No distribution involved: a mise toolchain is a directory, which is what lets it be copied
+    // into an image without a base system underneath it.
+    let spec = PackageSpec::parse("mise:node@20.11.0").expect("spec");
+    assert_eq!(spec.label(), "mise:node@20.11.0");
+    assert_eq!(spec.name, "node");
+    assert_eq!(spec.version.as_deref(), Some("20.11.0"));
+
+    let recipe = Recipe::from_toml(
+        "[foundation]\nname = \"app\"\n\n[runtime]\npackages = [\"mise:python@3.12\"]\n",
+    )
+    .expect("recipe");
+
+    assert!(
+        recipe
+            .plan()
+            .runtime_packages
+            .contains(&"mise:python@3.12".to_owned())
+    );
+}

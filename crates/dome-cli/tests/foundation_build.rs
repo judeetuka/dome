@@ -51,7 +51,8 @@ fn a_recipe_becomes_a_foundation_directory() {
     let output = dir.join("foundations").join("dome-fixture-test");
     let report = build(&BuildOptions {
         recipe,
-        kernel,
+        kernel: Some(kernel.clone()),
+        kernel_root: dir.join("kernels"),
         output: output.clone(),
         init: static_init(),
         workload: None,
@@ -91,7 +92,8 @@ fn a_recipe_that_asks_for_packages_is_refused_for_now() {
     };
     let error = build(&BuildOptions {
         recipe,
-        kernel,
+        kernel: Some(kernel.clone()),
+        kernel_root: dir.join("kernels"),
         output: dir.join("out"),
         init: static_init(),
         workload: None,
@@ -122,7 +124,8 @@ fn a_built_foundation_boots_as_a_chamber() {
 
     build(&BuildOptions {
         recipe,
-        kernel,
+        kernel: Some(kernel.clone()),
+        kernel_root: dir.join("kernels"),
         output: output.clone(),
         init: Some(init),
         workload: None,
@@ -156,5 +159,91 @@ fn a_built_foundation_boots_as_a_chamber() {
         &outcome.console[outcome.console.len().saturating_sub(500)..]
     );
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- the kernel is resolved, not handed over ---
+
+#[test]
+fn a_foundation_builds_without_being_given_a_kernel() {
+    let Some(kernel) = fixture_kernel() else {
+        return;
+    };
+
+    let dir = scratch("profile");
+    let recipe = dir.join("dome.toml");
+    std::fs::write(&recipe, RECIPE).expect("recipe");
+
+    // Install the profile the way an operator would, once.
+    let kernels = dir.join("kernels");
+    let report = dome_cli::kernel::import(&kernels, "dome-minimal", &kernel).expect("import");
+    assert!(report.contains("installed kernel profile"), "{report}");
+
+    let output = dir.join("out");
+    let report = build(&BuildOptions {
+        recipe,
+        kernel: None,
+        kernel_root: kernels.clone(),
+        output: output.clone(),
+        init: static_init(),
+        workload: None,
+    })
+    .expect("build");
+
+    assert!(report.contains("built"), "{report}");
+    assert!(
+        report.contains("profile:   dome-minimal"),
+        "the profile is reported: {report}"
+    );
+    assert!(output.join(FOUNDATION_KERNEL).is_file());
+}
+
+#[test]
+fn a_missing_profile_names_the_command_that_fixes_it() {
+    let dir = scratch("noprofile");
+    let recipe = dir.join("dome.toml");
+    std::fs::write(&recipe, RECIPE).expect("recipe");
+
+    let error = build(&BuildOptions {
+        recipe,
+        kernel: None,
+        kernel_root: dir.join("kernels"),
+        output: dir.join("out"),
+        init: static_init(),
+        workload: None,
+    })
+    .unwrap_err();
+
+    assert!(error.contains("not installed"), "{error}");
+    assert!(
+        error.contains("dome kernel import"),
+        "the fix must be named: {error}"
+    );
+}
+
+#[test]
+fn importing_something_that_is_not_a_kernel_is_refused() {
+    let dir = scratch("notakernel");
+    let bogus = dir.join("not-a-kernel");
+    std::fs::write(&bogus, vec![0u8; 2048]).expect("write");
+
+    let error = dome_cli::kernel::import(&dir.join("kernels"), "bogus", &bogus).unwrap_err();
+    assert!(error.contains("boot signature"), "{error}");
+}
+
+#[test]
+fn installed_profiles_are_listed() {
+    let Some(kernel) = fixture_kernel() else {
+        return;
+    };
+
+    let dir = scratch("list");
+    let kernels = dir.join("kernels");
+    dome_cli::kernel::import(&kernels, "dome-minimal", &kernel).expect("import");
+
+    assert_eq!(
+        dome_cli::kernel::list(&kernels).expect("list"),
+        vec!["dome-minimal".to_owned()]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

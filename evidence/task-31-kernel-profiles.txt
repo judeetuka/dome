@@ -1,0 +1,14 @@
+# kernel profiles and mise; no Alpine
+# command: cargo test -p dome-cli --test foundation_build -j4
+
+a_foundation_builds_without_being_given_a_kernel ... ok
+a_missing_profile_names_the_command_that_fixes_it ... ok
+importing_something_that_is_not_a_kernel_is_refused ... ok
+installed_profiles_are_listed ... ok
+
+# mise source (dome-config):
+mise_is_a_package_source ... ok
+
+# no user-facing kernel path:
+#   dome kernel import --profile dome-minimal --from <bzImage>
+#   dome build --recipe dome.toml --output foundations/dome-minimal

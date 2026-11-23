@@ -29,8 +29,10 @@ pub const EMBEDDED_WORKLOAD: &str = "workload";
 pub struct BuildOptions {
     /// The recipe, which may include others.
     pub recipe: PathBuf,
-    /// The kernel to ship.
-    pub kernel: PathBuf,
+    /// A kernel image to use instead of the recipe's profile. A development override.
+    pub kernel: Option<PathBuf>,
+    /// Where kernel profiles live. Overridable so tests do not touch the real store.
+    pub kernel_root: PathBuf,
     /// Where the foundation directory goes.
     pub output: PathBuf,
     /// The static init to run as pid 1. Defaults to the musl build in the workspace.
@@ -66,6 +68,13 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
         })?,
     };
 
+    // The recipe names a profile, not a path: a user should no more pass a kernel than they
+    // should pass a C library.
+    let kernel = match options.kernel.clone() {
+        Some(path) => path,
+        None => crate::kernel::resolve(&options.kernel_root, &recipe.kernel)?,
+    };
+
     let init_bytes = fs::read(&init)
         .map_err(|error| format!("cannot read the init at {}: {error}", init.display()))?;
 
@@ -93,12 +102,8 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     fs::create_dir_all(&options.output)
         .map_err(|error| format!("cannot create {}: {error}", options.output.display()))?;
 
-    let kernel_bytes = fs::read(&options.kernel).map_err(|error| {
-        format!(
-            "cannot read the kernel {}: {error}",
-            options.kernel.display()
-        )
-    })?;
+    let kernel_bytes = fs::read(&kernel)
+        .map_err(|error| format!("cannot read the kernel {}: {error}", kernel.display()))?;
 
     let kernel_path = options.output.join(FOUNDATION_KERNEL);
     let initramfs_path = options.output.join(FOUNDATION_INITRAMFS);
@@ -130,6 +135,7 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     report.push_str(&format!("  kernel:    {} bytes\n", kernel_bytes.len()));
     report.push_str(&format!("  initramfs: {} bytes\n", archive.len()));
     report.push_str(&format!("  init:      {}\n", init.display()));
+    report.push_str(&format!("  profile:   {}\n", recipe.kernel));
     report.push_str(&format!(
         "  total:     {} bytes\n",
         kernel_bytes.len() + archive.len()

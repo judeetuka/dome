@@ -12,9 +12,14 @@ first two:
 
 | Approach | What you get | Rough size | Change a package by |
 | --- | --- | --- | --- |
-| **Assembled** (Buildroot) | exactly the kernel plus the packages you listed: musl, busybox, your binary | ~12–20 MiB | rebuilding |
-| **Distribution base** (Alpine) | apk, coreutils, shells, compilers | ~200 MiB | rebuilding, or `apk add` inside a dev chamber |
+| **Assembled** (Buildroot) | exactly the kernel plus the packages you listed | ~12–20 MiB | rebuilding |
+| **mise toolchains** | self-contained per-tool directories, no root and no distribution | depends on the tool | reinstalling the toolchain |
 | **Your own thing** | whatever you produce, as long as it boots | anything | your call |
+
+**No distribution base is on that list, and that is deliberate.** Alpine was in the plan as a
+convenience; it is out. A base distro brings a package manager, an init, and a set of opinions
+about what belongs on a system, and the point of a foundation is that it carries *only* what the
+recipe names.
 
 The assembled route is the lean one, and it is not a compromise: Buildroot compiles the kernel
 and only the userland you name, statically or against musl, with no package manager on the
@@ -28,16 +33,27 @@ is the same reasoning behind the three-device model — fewer parts is the secur
 buildable. Adding one costs its binary and libraries, nothing more. A foundation that carries
 all four shells deliberately is a few megabytes, not a hundred.
 
-## Why the developer foundation exists anyway
+## Where packages come from without a distribution
 
-Compiling a project needs a compiler, headers, and a package manager to fetch dependencies.
-That is most of what a distribution is *for*. Rather than pretend a 15 MiB image can build Rust,
-there are two recipes:
+[mise](https://mise.jdx.dev) installs self-contained tool directories: a version of node, python
+or rust lives under its own path and needs no root, no system package manager, and no base image.
+That fits a foundation exactly, because "install a package" becomes "copy a directory".
 
-- `foundations/buildroot/` — the minimal, production-shaped foundation (T29)
-- `foundations/alpine/` — the developer foundation with gcc, make, git, strace and gdb (T30)
+```toml
+[runtime]
+packages = ["mise:node@20.11.0", "mise:python@3.12"]
 
-They share a kernel profile (T31), so a program built in one runs in the other.
+[build]
+packages = ["mise:rust@1.95.0"]
+```
+
+Two honest caveats:
+
+- Most mise toolchains link against the host's C library, so shipping one means shipping that
+  library too — which is what `static_linking = false` with `libc` declares. A statically linked
+  binary avoids the question entirely.
+- Copying a toolchain into an image is not implemented yet; today a recipe with packages is
+  **refused** rather than silently producing an image without them.
 
 ## Immutability and the writable layer
 
@@ -98,6 +114,25 @@ Worth knowing before you pick: **runit, s6, dinit, openrc, tini and dumb-init ar
 official Arch repositories** (checked with `pacman -Si` on this host). Choosing one means the AUR
 or building it, which the builder must be able to do. systemd is in every repository and costs
 about 45 MiB.
+
+### The kernel comes from a profile, not from the command line
+
+A user names a profile; the profile resolves to an image on this host. Nobody passes a kernel
+path, for the same reason nobody passes a C library:
+
+```toml
+[foundation]
+kernel = "dome-minimal"     # a profile, not a file
+```
+
+```text
+dome kernel import --profile dome-minimal --from <bzImage>   # once, by whoever provides it
+dome build --recipe dome.toml --output foundations/dome-minimal
+```
+
+Kernel profiles live in `$XDG_DATA_HOME/dome/kernels/<profile>/vmlinuz`. Importing validates the
+boot signature, so a file that is not a kernel image is refused where it is installed rather than
+where it fails to boot. `--kernel` still exists on `build` as a hidden development override.
 
 ### Our own kernel, never a distribution kernel package
 
