@@ -1,0 +1,6 @@
+
+# ring compiles C, so a musl build needs a musl C compiler. Recording it here means a build
+# does not depend on someone remembering an environment variable.
+[env]
+CC_x86_64_unknown_linux_musl = "musl-gcc"
+CXX_x86_64_unknown_linux_musl = "musl-gcc"

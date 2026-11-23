@@ -1,3 +1,7 @@
+//! Network policy and the packets behind it.
+
+pub mod packets;
+
 use dome_core::{EgressPolicy, PortMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

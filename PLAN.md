@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 391 tests passing
+**Verified state of the tree**: 400 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4039,6 +4039,33 @@ Max Concurrent: 6 (M1 wave)
   - [x] A corrupt record does not hide the valid ones
   - [x] Reconciliation resumes what was running and nothing else
   - [x] The record cannot escape its directory
+
+---
+
+- [ ] 76. **A Network Path Into the Chamber (virtio-net and user-mode NAT)**
+
+  > The chamber installs its own packages, which means it must reach the network. The engine has
+  > no NIC at all: its device set is a UART, a virtio-mmio transport and an initramfs loader. This
+  > is the piece that unblocks the whole in-chamber install story.
+  >
+  > **Done**: the packet layer, in `dome-net`. Ethernet, IPv4, ICMP echo, UDP and TCP, parsed
+  > and built by hand, with the internet checksum and the pseudo-header checksum for
+  > transports. Ten tests, including the property that actually matters: sum a header with its
+  > checksum included and you get zero. Every parser is total - the input is whatever a guest
+  > chose to send.
+  >
+  > **Owed**:
+  > 1. the transport must give backends guest memory. `VirtioBackend::notify` takes a queue
+  >    number and nothing else, so no backend can read a descriptor today
+  > 2. a virtio-net device: two queues, a MAC in config space, the feature bits the kernel wants
+  > 3. user-mode NAT: answer ARP, echo ICMP, proxy DNS, and relay TCP through host sockets
+  > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP
+  > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool
+  >
+  > **Must NOT do**:
+  > - Do not trust a length field from the guest without checking it against the buffer.
+  > - Do not skip checksum verification on inbound packets.
+  > - Do not let the guest see a host address or a host socket: the NAT owns every mapping.
 
 ---
 

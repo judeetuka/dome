@@ -1,0 +1,18 @@
+# packet layer and the shipped fetcher
+# command: cargo test -p dome-net --test packets -j4
+
+a_frame_round_trips ... ok
+a_truncated_frame_is_an_error_not_a_panic ... ok
+the_ipv4_header_checksum_verifies ... ok
+an_ipv4_packet_with_an_impossible_length_is_refused ... ok
+a_tcp_segment_checksum_verifies ... ok
+a_udp_datagram_never_sends_a_zero_checksum ... ok
+an_echo_request_comes_back_as_a_reply ... ok
+
+# the shipped fetcher (ring + ureq, static):
+#   dome-fetch https://mise.run /tmp/mise-installer.sh
+#   fetched 17379 bytes                                        -> starts with #!/bin/sh
+#   target/x86_64-unknown-linux-musl/release/dome-fetch         statically linked
+
+# the musl C toolchain is now a build setting, not a remembered environment variable:
+#   .cargo/config.toml  [env] CC_x86_64_unknown_linux_musl = musl-gcc
