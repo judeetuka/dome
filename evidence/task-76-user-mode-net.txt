@@ -1,0 +1,13 @@
+# user-mode networking, checked frame by frame
+# command: cargo test -p dome-net --test nat -j4
+
+the_guest_learns_the_routers_mac_address ... ok
+an_arp_request_for_something_else_is_ignored ... ok
+ping_comes_back ... ok
+a_name_is_resolved_by_the_engine ... ok
+a_connection_the_engine_refuses_is_reset_not_silently_dropped ... ok
+an_accepted_connection_is_acknowledged_and_then_relayed ... ok
+data_for_an_unknown_flow_is_not_relayed ... ok
+
+# a refusal is a RST, not silence: silence makes the guest wait for a timeout that reads
+# like a network fault rather than a policy.

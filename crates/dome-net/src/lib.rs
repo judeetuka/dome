@@ -1,5 +1,6 @@
 //! Network policy and the packets behind it.
 
+pub mod nat;
 pub mod packets;
 
 use dome_core::{EgressPolicy, PortMap};

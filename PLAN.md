@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 409 tests passing
+**Verified state of the tree**: 416 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4042,6 +4042,46 @@ Max Concurrent: 6 (M1 wave)
 
 ---
 
+- [ ] 77. **Exposing a Chamber Beyond the Host: the Dome Access Point**
+
+  > A chamber's ports can be reached three ways, and the user picks per port:
+  >
+  > | Mode | Reached at | Needs |
+  > | --- | --- | --- |
+  > | `host` | 127.0.0.1 (private) or 0.0.0.0 (local network) | nothing |
+  > | `access-point` | a name under the operator's domain | an outbound connection |
+  > | `both` | either | both |
+  >
+  > The point of the access point mode is the business that has no public IP and no wish to
+  > manage one: the chamber dials **out** to a Dome access point, which accepts the tunnel and
+  > answers on the operator's domain. Nothing listens inbound on the customer's machine, so there
+  > is no port forward, no static address and no inbound firewall rule to get wrong.
+  >
+  > **Learned from rathole, not taken from it.** The useful idea is a reverse tunnel with a
+  > multiplexed control channel and per-service data streams, so one connection carries every
+  > published port. The parts to change:
+  > - a published port should be **named and scoped**, not a raw remote port number, so two
+  >   customers cannot collide and the operator can put a name and a certificate on it
+  > - the tunnel should be **identity-bearing**: the chamber proves which release it is running,
+  >   so the access point can refuse a chamber that does not match its seal
+  > - authorization per port, not per tunnel: publishing 443 should not imply publishing 5432
+  > - no client-side configuration file with a shared token. The token is a credential and gets
+  >   the same treatment as a release key
+  >
+  > **Must NOT do**:
+  > - Do not open an inbound listener on the customer's host to make this work.
+  > - Do not reuse one token across chambers or across ports.
+  > - Do not let the access point terminate TLS for the chamber's own protocols unless asked;
+  >   passthrough keeps end-to-end properties that termination throws away.
+
+  **Acceptance Criteria**:
+  - [ ] a port declares its exposure mode (host, access-point, both) in the cell blueprint
+  - [ ] an outbound tunnel carries several published ports over one connection
+  - [ ] the access point refuses a chamber whose identity does not match its seal
+  - [ ] publishing a port grants nothing else
+
+---
+
 - [ ] 76. **A Network Path Into the Chamber (virtio-net and user-mode NAT)**
 
   > The chamber installs its own packages, which means it must reach the network. The engine has
@@ -4065,7 +4105,9 @@ Max Concurrent: 6 (M1 wave)
   >
   > 2. ~~a virtio-net device~~ - **done**: queue 0 receives, queue 1 transmits, MAC and link
   >    status in config space, no offload features, and every guest length treated as a claim
-  > 3. user-mode NAT: answer ARP, echo ICMP, proxy DNS, and relay TCP through host sockets
+  > 3. ~~user-mode NAT~~ - **protocol logic done** in dome-net::nat: answers ARP, echoes ICMP,
+  >    proxies DNS and relays TCP through a TcpRelay trait. Remaining: the socket-backed relay
+  >    and resolver, and wiring the device into ChamberIo and the launch loop.
   > 4. the guest side: static addressing (10.0.2.15/24, gateway 10.0.2.2) instead of DHCP
   > 5. the proof: a chamber boots, fetches mise over HTTPS with its own fetcher, and installs a tool
   >
