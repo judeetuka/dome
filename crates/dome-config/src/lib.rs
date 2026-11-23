@@ -1,5 +1,6 @@
 pub mod foundation_recipe;
 pub mod include;
+pub mod installer;
 pub mod stack;
 
 use dome_core::{

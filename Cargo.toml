@@ -18,6 +18,7 @@ members = [
     "crates/dome-supervisor",
     "crates/dome-test-utils",
     "crates/dome-init",
+    "crates/dome-fetch",
 ]
 default-members = ["crates/dome-cli"]
 

@@ -1,0 +1,18 @@
+[package]
+name = "dome-fetch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dome-fetch"
+path = "src/main.rs"
+
+[dependencies]
+# A small HTTP client with a Rust TLS stack, so the resulting binary is static and carries no
+# host library with it.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[lints.rust]
+unsafe_code = "forbid"

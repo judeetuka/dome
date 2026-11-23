@@ -39,6 +39,8 @@ pub struct BuildOptions {
     pub init: Option<PathBuf>,
     /// A program to embed and run, if the image exists to run one.
     pub workload: Option<PathBuf>,
+    /// A statically linked fetcher, which is how the chamber reaches the network itself.
+    pub fetcher: Option<PathBuf>,
 }
 
 /// Build a foundation directory and report what it contains.
@@ -47,17 +49,45 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     let recipe = Recipe::from_toml(&merged).map_err(|error| error.to_string())?;
     let plan = recipe.plan();
 
-    // Refusing is the honest option: an image that silently contains none of the packages it
-    // lists would look like a successful build and fail at run time.
-    if !recipe.runtime.packages.is_empty() {
-        return Err(format!(
-            "this recipe asks for {} runtime package(s) ({}), and package installation is not \
-             implemented yet: it needs apk or pacman writing into a staging root. Build a \
-             package-free recipe, or wait for the package stage.",
-            recipe.runtime.packages.len(),
-            plan.runtime_packages.join(", ")
-        ));
+    // The chamber installs its own packages, so an image whose recipe names packages but no
+    // installer would boot into a filesystem that could never gain them.
+    if !recipe.installer.needs_binary()
+        && (!recipe.runtime.packages.is_empty() || !recipe.build.packages.is_empty())
+    {
+        return Err(
+            "this recipe names packages but no installer: the chamber installs its own packages, \
+             so name one with installer = \"mise\" and installer_source = \"<url>\""
+                .to_owned(),
+        );
     }
+
+    // Packages are installed by the chamber, from the network, by the installer the recipe names.
+    // Nothing is copied out of the host, because a host may be macOS or Windows and have no Linux
+    // toolchains at all - and whatever it has is linked against its own C library.
+    let bootstrap = if recipe.installer.needs_binary() {
+        let fetcher = options.fetcher.clone().ok_or_else(|| {
+            "this recipe installs packages inside the chamber, which needs a statically linked \
+             fetcher embedded in the image. Pass --fetcher <path>."
+                .to_owned()
+        })?;
+
+        let bytes = fs::read(&fetcher)
+            .map_err(|error| format!("cannot read the fetcher {}: {error}", fetcher.display()))?;
+
+        // A dynamic fetcher would need the host's C library inside the chamber, which is the
+        // dependency this arrangement exists to avoid.
+        if !dome_config::installer::is_static_elf(&bytes).map_err(|error| error.to_string())? {
+            return Err(format!(
+                "the fetcher at {} is dynamically linked; it must be static or the image would \
+                 depend on the host's C library",
+                fetcher.display()
+            ));
+        }
+
+        Some((fetcher, bytes))
+    } else {
+        None
+    };
 
     let init = match options.init.clone() {
         Some(path) => path,
@@ -88,6 +118,26 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     image
         .add(Entry::executable("init", init_bytes))
         .map_err(|error| error.to_string())?;
+
+    if let Some((_, bytes)) = bootstrap.as_ref() {
+        image
+            .add(Entry::executable("usr/bin/dome-fetch", bytes.clone()))
+            .map_err(|error| error.to_string())?;
+
+        // The chamber reads this at boot to install what the recipe asked for.
+        let mut manifest = format!(
+            "installer={}\nsource={}\n",
+            recipe.installer.as_str(),
+            recipe.installer_source.as_deref().unwrap_or_default()
+        );
+        for package in &plan.runtime_packages {
+            manifest.push_str(&format!("package={package}\n"));
+        }
+
+        image
+            .add(Entry::file("etc/dome/bootstrap", manifest.into_bytes()))
+            .map_err(|error| error.to_string())?;
+    }
 
     if let Some(workload) = options.workload.as_ref() {
         let bytes = fs::read(workload)

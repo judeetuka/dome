@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 378 tests passing
+**Verified state of the tree**: 381 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -4039,6 +4039,35 @@ Max Concurrent: 6 (M1 wave)
   - [x] A corrupt record does not hide the valid ones
   - [x] Reconciliation resumes what was running and nothing else
   - [x] The record cannot escape its directory
+
+---
+
+- [ ] 73. **In-Chamber Installation (the chamber fetches its own package manager)**
+
+  > Blocked on one environment piece, recorded rather than worked around: the fetcher must be a
+  > **static** binary, and building one needs `ring`, which needs `x86_64-linux-musl-gcc`. This
+  > host has no musl C toolchain, so `cargo build --target x86_64-unknown-linux-musl -p dome-fetch`
+  > fails in `cc-rs` with `ToolNotFound`.
+  >
+  > Two ways forward, both small: install the `musl` package (provides `musl-gcc`), or use a
+  > pure-Rust TLS provider to avoid the C dependency entirely.
+
+  **What already exists**: the model and the wiring. `[foundation] installer = "mise"` with
+  `installer_source`, packages installed *by the chamber* over the network, a `--fetcher` that
+  must be a static ELF (`is_static_elf` refuses a dynamic one because it would pull the host's C
+  library in), and a `/etc/dome/bootstrap` record written into the image describing what to
+  install. The builder refuses an image whose recipe names packages but no installer.
+
+  **Must NOT do**:
+  - Do not copy toolchains out of the host. A macOS or Windows host has no Linux toolchains, and
+    anything it does have is linked against its own C library.
+
+  **Acceptance Criteria**:
+  - [x] A dynamic fetcher is refused; a static one is embedded
+  - [x] The image records what to install and from where
+  - [x] A recipe with packages but no installer is refused at build time
+  - [ ] `dome-fetch` builds statically on a host with a musl toolchain
+  - [ ] A chamber boots, fetches mise, and installs a package with no host involvement
 
 ---
 

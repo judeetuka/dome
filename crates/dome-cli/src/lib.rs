@@ -211,6 +211,9 @@ enum Commands {
         /// A program to embed and run
         #[arg(long, value_name = "PATH")]
         workload: Option<PathBuf>,
+        /// A statically linked fetcher for in-chamber package installation
+        #[arg(long, value_name = "PATH")]
+        fetcher: Option<PathBuf>,
     },
 
     /// Print the header of a .dome artifact (arrives in M2)
@@ -516,6 +519,7 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             output,
             init,
             workload,
+            fetcher,
         } => {
             if list {
                 return Ok(
@@ -537,6 +541,7 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
                 output,
                 init,
                 workload,
+                fetcher,
             })
             .map_err(CliError::Failed)
         }

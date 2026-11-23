@@ -1,0 +1,15 @@
+# the chamber installs its own packages
+# command: cargo test -p dome-cli --test foundation_build -j4
+
+a_recipe_with_packages_needs_a_static_fetcher ... ok
+a_dynamic_fetcher_is_refused_because_it_would_depend_on_the_host ... ok
+a_static_fetcher_puts_the_bootstrap_into_the_image ... ok
+a_recipe_with_packages_is_refused_without_an_installer ... ok
+
+# measured on this host, which is why nothing is copied from it:
+#   host mise:  192 MB, dynamically linked (libdl, libgcc_s)
+#   host node:  dynamically linked
+# a Linux guest on a macOS or Windows host would have nothing to copy at all.
+
+# blocked: dome-fetch (static, ring) needs x86_64-linux-musl-gcc, which this host lacks.
+#   cc-rs: ToolNotFound: failed to find tool "x86_64-linux-musl-gcc"

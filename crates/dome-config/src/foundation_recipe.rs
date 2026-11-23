@@ -13,6 +13,7 @@
 //! supported, and does the bookkeeping rather than leaving it to be discovered.
 
 use crate::ConfigError;
+use crate::installer::Installer;
 
 /// Which package manager fetches a package.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -411,6 +412,10 @@ pub struct Recipe {
     pub artifacts: Vec<String>,
     /// The interactive shell, if the image has one.
     pub shell: Option<Shell>,
+    /// Which package manager the chamber installs for itself.
+    pub installer: Installer,
+    /// Where the chamber fetches its installer from.
+    pub installer_source: Option<String>,
     /// Who the chamber runs as.
     pub user: UserSpec,
     /// Where the project lives inside the chamber.
@@ -442,6 +447,8 @@ impl Recipe {
             build: Packages::default(),
             artifacts: Vec::new(),
             shell: None,
+            installer: Installer::None,
+            installer_source: None,
             user: UserSpec::Root,
             workspace: None,
         }
@@ -477,6 +484,9 @@ impl Recipe {
             workload: Option<String>,
             #[serde(default)]
             package_manager: String,
+            #[serde(default)]
+            installer: String,
+            installer_source: Option<String>,
             /// Shorthand for the runtime section.
             #[serde(default)]
             packages: Vec<String>,
@@ -593,6 +603,13 @@ impl Recipe {
                 path: workspace.path,
                 host: workspace.host,
             }),
+            installer: Installer::parse(&file.foundation.installer).ok_or_else(|| {
+                ConfigError::Unknown {
+                    kind: "installer",
+                    value: file.foundation.installer.clone(),
+                }
+            })?,
+            installer_source: file.foundation.installer_source,
             shell: match file.shell {
                 Some(shell) => Some(Shell {
                     default: shell.default,
@@ -694,6 +711,10 @@ impl Recipe {
             });
         }
 
+        if self.installer.needs_binary() && self.installer_source.is_none() {
+            return Err(ConfigError::MissingField("foundation.installer_source"));
+        }
+
         if self.init == InitChoice::None && self.workload.is_none() {
             return Err(ConfigError::MissingField(
                 "foundation.workload (required when init = none)",
@@ -745,6 +766,25 @@ impl Recipe {
                     manager.as_str()
                 ));
             }
+        }
+
+        if !self.installer.needs_binary()
+            && (!self.runtime.packages.is_empty() || !self.build.packages.is_empty())
+        {
+            // Parsing stays permissive because a plan is useful without an installer; producing an
+            // image is not, and the builder refuses there.
+            notes.push(
+                "packages are named but no installer is: nothing will install them inside the chamber"
+                    .to_owned(),
+            );
+        }
+
+        if self.installer.needs_binary() {
+            notes.push(format!(
+                "{} is installed by the chamber itself from {}",
+                self.installer.as_str(),
+                self.installer_source.as_deref().unwrap_or("(no source)")
+            ));
         }
 
         if let Some(package) = self.package_manager.package() {

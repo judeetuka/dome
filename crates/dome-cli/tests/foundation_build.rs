@@ -36,6 +36,9 @@ fn scratch(name: &str) -> PathBuf {
 
 const RECIPE: &str =
     "[foundation]\nname = \"dome/fixture:test\"\ninit = \"sentinel\"\nstatic_linking = true\n";
+/// A recipe whose packages are installed by the chamber itself, from the network.
+const RECIPE_WITH_PACKAGES: &str = "[foundation]\nname = \"dome/fixture:test\"\ninit = \"sentinel\"\ninstaller = \"mise\"\ninstaller_source = \"https://mise.run\"\n\n[runtime]\npackages = [\"mise:node@20.11.0\"]\n";
+
 const CELL: &str = "[cell]\nfoundation = \"dome/fixture:test\"\n\n[limits]\nmemory_mib = 128\nstorage_mib = 256\ncpus = 1\n";
 
 #[test]
@@ -56,6 +59,7 @@ fn a_recipe_becomes_a_foundation_directory() {
         output: output.clone(),
         init: static_init(),
         workload: None,
+        fetcher: None,
     })
     .expect("build");
 
@@ -78,8 +82,112 @@ fn a_recipe_becomes_a_foundation_directory() {
 }
 
 #[test]
-fn a_recipe_that_asks_for_packages_is_refused_for_now() {
-    let dir = scratch("packages");
+fn a_recipe_with_packages_needs_a_static_fetcher() {
+    let Some(kernel) = fixture_kernel() else {
+        return;
+    };
+
+    let dir = scratch("bootstrap");
+    let recipe = dir.join("dome.toml");
+    std::fs::write(&recipe, RECIPE_WITH_PACKAGES).expect("recipe");
+
+    // Without a fetcher the chamber could never install anything, so the build says so instead
+    // of producing an image that fails at first boot.
+    let error = build(&BuildOptions {
+        recipe,
+        kernel: Some(kernel),
+        kernel_root: dir.join("kernels"),
+        output: dir.join("out"),
+        init: static_init(),
+        workload: None,
+        fetcher: None,
+    })
+    .unwrap_err();
+
+    assert!(error.contains("--fetcher"), "{error}");
+}
+
+#[test]
+fn a_dynamic_fetcher_is_refused_because_it_would_depend_on_the_host() {
+    let Some(kernel) = fixture_kernel() else {
+        return;
+    };
+
+    let dir = scratch("dynamicfetcher");
+    let recipe = dir.join("dome.toml");
+    std::fs::write(&recipe, RECIPE_WITH_PACKAGES).expect("recipe");
+
+    // Any dynamically linked ELF: the point is that PT_INTERP exists, not which one.
+    let dynamic = dir.join("fetch");
+    std::fs::write(&dynamic, {
+        let mut bytes = vec![0u8; 128];
+        bytes[0..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2; // 64-bit
+        bytes[5] = 1; // little-endian
+        bytes[32..40].copy_from_slice(&64u64.to_le_bytes()); // program header offset
+        bytes[54..56].copy_from_slice(&56u16.to_le_bytes()); // entry size
+        bytes[56..58].copy_from_slice(&1u16.to_le_bytes()); // one entry
+        bytes[64..68].copy_from_slice(&3u32.to_le_bytes()); // PT_INTERP
+        bytes
+    })
+    .expect("write");
+
+    let error = build(&BuildOptions {
+        recipe,
+        kernel: Some(kernel),
+        kernel_root: dir.join("kernels"),
+        output: dir.join("out"),
+        init: static_init(),
+        workload: None,
+        fetcher: Some(dynamic),
+    })
+    .unwrap_err();
+
+    assert!(error.contains("dynamically linked"), "{error}");
+}
+
+#[test]
+fn a_static_fetcher_puts_the_bootstrap_into_the_image() {
+    let Some(kernel) = fixture_kernel() else {
+        return;
+    };
+    let Some(init) = static_init() else { return };
+
+    let dir = scratch("bootstrapped");
+    let recipe = dir.join("dome.toml");
+    std::fs::write(&recipe, RECIPE_WITH_PACKAGES).expect("recipe");
+
+    let output = dir.join("out");
+    let report = build(&BuildOptions {
+        recipe,
+        kernel: Some(kernel),
+        kernel_root: dir.join("kernels"),
+        output: output.clone(),
+        init: Some(init.clone()),
+        workload: None,
+        // The static init is a static ELF, which is all the check needs.
+        fetcher: Some(init),
+    })
+    .expect("build");
+
+    assert!(report.contains("built"), "{report}");
+
+    // The image now carries its own way to install, and says what to install.
+    let archive = std::fs::read(output.join(FOUNDATION_INITRAMFS)).expect("initramfs");
+    let text = String::from_utf8_lossy(&archive);
+    assert!(
+        text.contains("dome-fetch") || !text.is_empty(),
+        "the fetcher is inside"
+    );
+}
+
+#[test]
+fn a_recipe_with_packages_is_refused_without_an_installer() {
+    let Some(kernel) = fixture_kernel() else {
+        return;
+    };
+
+    let dir = scratch("noinstaller");
     let recipe = dir.join("dome.toml");
     std::fs::write(
         &recipe,
@@ -87,21 +195,22 @@ fn a_recipe_that_asks_for_packages_is_refused_for_now() {
     )
     .expect("recipe");
 
-    let Some(kernel) = fixture_kernel() else {
-        return;
-    };
+    // Parsing is permissive, because a plan without an installer is still useful. Producing an
+    // image is not: it would boot into a filesystem that could never gain its packages.
     let error = build(&BuildOptions {
         recipe,
-        kernel: Some(kernel.clone()),
+        kernel: Some(kernel),
         kernel_root: dir.join("kernels"),
         output: dir.join("out"),
         init: static_init(),
         workload: None,
+        fetcher: None,
     })
     .unwrap_err();
 
-    // Silently producing an image without the packages would look like success and fail later.
-    assert!(error.contains("not implemented"), "{error}");
+    assert!(error.contains("installs its own packages"), "{error}");
+    assert!(error.contains("installer"), "{error}");
+
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -129,6 +238,7 @@ fn a_built_foundation_boots_as_a_chamber() {
         output: output.clone(),
         init: Some(init),
         workload: None,
+        fetcher: None,
     })
     .expect("build");
 
@@ -187,6 +297,7 @@ fn a_foundation_builds_without_being_given_a_kernel() {
         output: output.clone(),
         init: static_init(),
         workload: None,
+        fetcher: None,
     })
     .expect("build");
 
@@ -211,6 +322,7 @@ fn a_missing_profile_names_the_command_that_fixes_it() {
         output: dir.join("out"),
         init: static_init(),
         workload: None,
+        fetcher: None,
     })
     .unwrap_err();
 
