@@ -8,6 +8,7 @@
 //! Nothing here mentions KVM, Hypervisor.framework or WHP. A device is a register file plus a
 //! memory view, which is what lets one foundation boot unchanged on all three engines.
 
+pub mod cmos;
 pub mod uart16550;
 pub mod virtio_mmio;
 pub mod virtio_net;
@@ -147,6 +148,9 @@ impl DeviceSet {
                 let (base, length) = device.mmio_range();
                 (device.name(), base, length)
             })
+            // A device that only answers on ports occupies no memory window, and reporting a
+            // zero-length one at address zero would put it in the kernel's command line.
+            .filter(|(_, _, length)| *length > 0)
             .collect()
     }
 
@@ -271,14 +275,49 @@ pub fn read_descriptor(
 /// write from a modern one reach the same device, so the two cannot disagree about state.
 pub struct ChamberIo {
     devices: DeviceSet,
+    /// Whether a port no device owns reads as all-ones, the way an empty bus floats.
+    ///
+    /// Modern kernels assume real platform hardware (a keyboard controller, an RTC) and spin when
+    /// a floated port reads zero, because zero means "device present, nothing to report". Older
+    /// test guests do not, so this is a property of the chamber rather than a global rule.
+    absent_ports_float_high: bool,
+    /// Device accesses, when DOME_ACCESS_STATS is set. A guest that spins looks like a hang; the
+    /// addresses it spins on say what it is waiting for.
+    access: std::collections::HashMap<String, u64>,
 }
 
 impl ChamberIo {
+    /// Record one access, when asked to.
+    fn note(&mut self, kind: &str, address: u64) {
+        if std::env::var_os("DOME_ACCESS_STATS").is_none() {
+            return;
+        }
+
+        let key = format!("{kind} {address:#x}");
+        *self.access.entry(key).or_insert(0) += 1;
+    }
+
+    /// The most frequent accesses, for a guest that will not move.
+    pub fn hottest_accesses(&self, limit: usize) -> Vec<(String, u64)> {
+        let mut all: Vec<(String, u64)> =
+            self.access.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        all.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        all.truncate(limit);
+        all
+    }
+
     /// A chamber with a console and nothing else, which is the current device set.
     pub fn with_console() -> Self {
         let mut devices = DeviceSet::new();
         devices.add(Box::new(uart16550::Uart16550::new()));
-        Self { devices }
+        // The clock is a platform device like the console: a guest assumes it exists, and a
+        // floated bus does not read as "absent", it reads as "always busy".
+        devices.add(Box::new(cmos::Cmos::new()));
+        Self {
+            devices,
+            access: std::collections::HashMap::new(),
+            absent_ports_float_high: false,
+        }
     }
 
     /// A chamber with a console and a network device.
@@ -289,16 +328,31 @@ impl ChamberIo {
     pub fn with_console_and_network(backend: impl NetworkBackend + 'static) -> Self {
         let mut devices = DeviceSet::new();
         devices.add(Box::new(uart16550::Uart16550::new()));
+        devices.add(Box::new(cmos::Cmos::new()));
         devices.add(Box::new(virtio_mmio::VirtioMmio::new(
             VIRTIO_MMIO_BASE,
             virtio_net::VirtioNet::new(backend),
         )));
-        Self { devices }
+        Self {
+            devices,
+            access: std::collections::HashMap::new(),
+            absent_ports_float_high: false,
+        }
+    }
+
+    /// Make unowned ports read as all-ones, which is what modern kernels expect of a PC.
+    pub fn with_floating_bus(mut self) -> Self {
+        self.absent_ports_float_high = true;
+        self
     }
 
     /// A chamber with devices the caller chose.
     pub fn from_devices(devices: DeviceSet) -> Self {
-        Self { devices }
+        Self {
+            devices,
+            access: std::collections::HashMap::new(),
+            absent_ports_float_high: false,
+        }
     }
 
     /// The device set, for attaching more.
@@ -334,18 +388,29 @@ impl ChamberIo {
 
 impl crate::vcpu::VcpuIo for ChamberIo {
     fn io_in(&mut self, port: u16, data: &mut [u8]) {
-        self.devices.io_read(port, data);
+        self.note("io-read", u64::from(port));
+
+        if !self.devices.io_read(port, data) && self.absent_ports_float_high {
+            // An uninhabited port reads as all-ones, not zero: a real machine has no device there
+            // and the bus floats high, where zero says "device present, nothing to report" and a
+            // driver waits for a bit that will never change. Measured: 10,003 polls of the
+            // keyboard controller on a newer kernel.
+            data.fill(0xFF);
+        }
     }
 
     fn io_out(&mut self, port: u16, data: &[u8]) {
+        self.note("io-write", u64::from(port));
         self.devices.io_write(port, data);
     }
 
     fn mmio_read(&mut self, address: u64, data: &mut [u8]) {
+        self.note("mmio-read", address);
         self.devices.mmio_read(address, data);
     }
 
     fn mmio_write(&mut self, address: u64, data: &[u8]) {
+        self.note("mmio-write", address);
         self.devices.mmio_write(address, data);
     }
 }

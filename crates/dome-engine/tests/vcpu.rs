@@ -83,6 +83,7 @@ fn guest_runs_and_its_serial_output_is_captured() {
             }
             VcpuStop::Shutdown => panic!("guest shut down, which here means a triple fault"),
             VcpuStop::Continue => {}
+            VcpuStop::Unhandled(code) => panic!("the engine missed exit type {code}"),
         }
     }
 

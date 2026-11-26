@@ -116,6 +116,20 @@ pub struct BootOutcome {
     pub captured: Option<CapturedState>,
 }
 
+/// What the vCPU did during a run.
+///
+/// A guest that hangs and a guest that is asleep look identical from the outside; the difference
+/// is whether the vCPU keeps coming back to the engine, and this is how that is told apart.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ExitCounts {
+    /// Times the guest executed HLT.
+    pub halted: u64,
+    /// Times the guest tried to shut down.
+    pub shutdown: u64,
+    /// Everything else: device access and MMIO.
+    pub continue_count: u64,
+}
+
 /// The interrupt number virtio devices are announced with.
 ///
 /// A GSI, not an ISA IRQ: the guest's driver registers a handler for whatever number it is told,
@@ -298,13 +312,27 @@ impl LinuxEngine {
         let mut stopped = false;
         let mut timed_out = false;
 
+        // Exit accounting: a guest that hangs and a guest that is asleep look identical from the
+        // outside, and the difference is whether the vCPU keeps returning to us.
+        let mut counts = ExitCounts::default();
+        let mut unhandled: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
+        let mut guest_time = std::time::Duration::ZERO;
+        let mut engine_time = std::time::Duration::ZERO;
+
         while exits < MAX_EXITS {
-            match vcpu.run_once(&mut io) {
+            let before = std::time::Instant::now();
+            let stop = vcpu.run_once(&mut io);
+            guest_time += before.elapsed();
+            let engine_start = std::time::Instant::now();
+
+            match stop {
                 Ok(VcpuStop::Shutdown) => {
+                    counts.shutdown += 1;
                     stopped = true;
                     break;
                 }
                 Ok(VcpuStop::Halted) => {
+                    counts.halted += 1;
                     // HLT is the guest saying "nothing to do until something happens", not "I am
                     // finished". Treating it as the end of the run truncated every boot the moment
                     // a process blocked on input - which looked like a silent userspace.
@@ -315,7 +343,11 @@ impl LinuxEngine {
                         line.service(io.interrupt_pending());
                     }
                 }
+                Ok(VcpuStop::Unhandled(code)) => {
+                    *unhandled.entry(code).or_insert(0) += 1;
+                }
                 Ok(VcpuStop::Continue) => {
+                    counts.continue_count += 1;
                     // A write may have rung a doorbell; only this loop has the memory a device
                     // needs to act on it.
                     io.service_pending(&memory);
@@ -330,12 +362,36 @@ impl LinuxEngine {
                     break;
                 }
                 Err(error) => {
-                    finished.store(true, Ordering::Relaxed);
                     return Err(error);
                 }
             }
 
+            engine_time += engine_start.elapsed();
             exits += 1;
+        }
+
+        if std::env::var("DOME_EXIT_STATS").is_ok() {
+            eprintln!(
+                "dome: time in kvm {:.1}ms, in engine {:.1}ms, over {} exits",
+                guest_time.as_secs_f64() * 1000.0,
+                engine_time.as_secs_f64() * 1000.0,
+                exits
+            );
+        }
+
+        for (code, count) in &unhandled {
+            eprintln!("dome: unhandled exit {code} x{count}");
+        }
+
+        for (access, count) in io.hottest_accesses(8) {
+            eprintln!("dome: access {access} x{count}");
+        }
+
+        if std::env::var("DOME_EXIT_STATS").is_ok() {
+            eprintln!(
+                "dome: vcpu exits: halt={} shutdown={} other={}",
+                counts.halted, counts.shutdown, counts.continue_count
+            );
         }
 
         finished.store(true, Ordering::Relaxed);

@@ -83,7 +83,9 @@ fn a_chamber_fetches_its_own_package_manager() {
     request.cmdline =
         "console=ttyS0 earlyprintk=ttyS0 panic=1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off"
             .to_owned();
-    request.timeout = Duration::from_secs(90);
+    // Enough for the handshake and the fetch attempt; the assertions read what happened early, so
+    // waiting longer only slows the suite.
+    request.timeout = Duration::from_secs(20);
 
     let engine = LinuxEngine::open().expect("engine");
     let io = ChamberIo::with_console_and_network(UserNetBackend::new(SocketRelay::permitting()));

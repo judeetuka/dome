@@ -94,6 +94,20 @@ fn starting_a_chamber_twice_is_refused_while_it_runs() {
     options.launcher = Some(stand_in_launcher(&dir));
 
     start(&options).expect("start");
+
+    // The invariant is "a running chamber cannot be started twice". Under a loaded machine the
+    // registry write and the liveness check can be observed in either order, so wait for the state
+    // the assertion is about instead of assuming it is already true.
+    let mut observed = false;
+    for _ in 0..100 {
+        if list(&dir).map(|report| report.contains("running")).unwrap_or(false) {
+            observed = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(observed, "the started chamber never appeared as running");
+
     let error = start(&options).unwrap_err();
     assert!(error.contains("already running"), "{error}");
 

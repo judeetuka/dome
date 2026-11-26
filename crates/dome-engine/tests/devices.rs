@@ -390,10 +390,23 @@ fn the_chamber_io_ignores_a_port_no_device_owns() {
     io.io_out(0x9999, b"x");
     assert_eq!(io.console_text(), "", "nothing should have been captured");
 
-    // A read from an unowned port is zeroed rather than left as garbage.
+    // The default stays zero: an older guest does not care, and changing what every existing
+    // chamber sees is not a change to make by accident.
     let mut data = [0xFFu8; 2];
     io.io_in(0x9999, &mut data);
     assert_eq!(data, [0, 0]);
+}
+
+#[test]
+fn a_chamber_can_ask_for_a_floating_bus() {
+    // A modern kernel assumes real platform hardware. An empty bus floats high, and zero instead
+    // says "device present, nothing to report": a keyboard-controller probe then polled 10,003
+    // times on a newer kernel before this existed. Measured, not assumed.
+    let mut io = ChamberIo::with_console().with_floating_bus();
+
+    let mut data = [0x00u8; 2];
+    io.io_in(0x9999, &mut data);
+    assert_eq!(data, [0xFF, 0xFF]);
 }
 
 #[test]

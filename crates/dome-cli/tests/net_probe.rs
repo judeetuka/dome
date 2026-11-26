@@ -44,9 +44,12 @@ impl NetworkBackend for Recorder {
 #[test]
 fn the_kernel_probes_the_network_and_configures_the_address_from_the_command_line() {
     let root = workspace_root();
-    // The kernel Dome built, if it is installed; otherwise the fixture.
+    // The kernel Dome built, if it is installed; otherwise the fixture. A profile can be named so
+    // a candidate kernel can be investigated without editing this test.
     let kernels = dome_cli::kernel::kernel_root();
-    let kernel = dome_cli::kernel::resolve(&kernels, "dome-minimal")
+    let profile =
+        std::env::var("DOME_KERNEL_PROFILE").unwrap_or_else(|_| "dome-minimal".to_owned());
+    let kernel = dome_cli::kernel::resolve(&kernels, &profile)
         .unwrap_or_else(|_| root.join("tests/fixtures/kernel/vmlinuz-virt"));
     let init = root.join("target/x86_64-unknown-linux-musl/release/dome-init");
 
@@ -81,15 +84,27 @@ fn the_kernel_probes_the_network_and_configures_the_address_from_the_command_lin
     // device itself.
     // Asking the kernel to configure the interface itself: with IP_PNP compiled in, this costs a
     // command-line parameter rather than a DHCP client in userspace.
-    request.cmdline =
-        "console=ttyS0 earlyprintk=ttyS0 panic=1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off"
-            .to_owned();
-    // The boot reaches init in about a second; the rest waits for nothing in particular.
-    request.timeout = Duration::from_secs(5);
+    let extra = std::env::var("DOME_EXTRA_CMDLINE").unwrap_or_default();
+    request.cmdline = format!(
+        "console=ttyS0 earlyprintk=ttyS0 panic=1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off {extra}"
+    );
+    // A working kernel reaches init in about a second, but a candidate with more logging needs
+    // longer, and "it hung" and "it was still booting" look identical without this knob.
+    let seconds = std::env::var("DOME_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(5);
+    request.timeout = Duration::from_secs(seconds);
 
     let recorder = Recorder::default();
     let frames = Arc::clone(&recorder.frames);
     let io = ChamberIo::with_console_and_network(recorder);
+    // A modern kernel assumes a real platform bus; the probe can ask for that behaviour.
+    let io = if std::env::var("DOME_FLOATING_BUS").is_ok() {
+        io.with_floating_bus()
+    } else {
+        io
+    };
 
     let outcome = engine.launch_with(&request, io).expect("boot");
     let console = outcome.console.clone();

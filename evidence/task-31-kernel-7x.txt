@@ -1,0 +1,31 @@
+# why the latest kernel did not boot: research, not guesswork
+
+# A/B against another VMM (diagnostic only, not the product path):
+#   qemu-system-x86_64 -kernel ~/.local/share/dome/kernels/dome-test/vmlinuz ...
+#   -> 1801 kernel log lines, reaches init, runs dome-init.
+#   our engine -> stops after 14 lines.
+# The kernel is healthy. The difference is our engine.
+
+# instrumented the engine (DOME_EXIT_STATS, DOME_ACCESS_STATS):
+#   time in kvm 4979ms, in engine 26ms, over 21476 exits
+#   access io-read 0x64 x10003      <- i8042 keyboard controller, polled 10k times
+#   access io-write 0x3fd/0x3f8     <- console
+
+# two real engine gaps found by that histogram:
+# 1. an unowned I/O port returned 0x00. Real hardware floats high; 0x00 tells a driver
+#    'device present, nothing to report', so the i8042 probe polled 10,003 times.
+#    ChamberIo::with_floating_bus() now offers the hardware behaviour (opt-in, because
+#    changing what every existing guest sees is not a change to make by accident).
+# 2. there was no CMOS RTC. Linux reads it for the wall clock and polls status A until
+#    'update in progress' clears; a floated 0x71 reads as busy forever. devices/cmos.rs now
+#    models it (fixed epoch, UIP clear).
+
+# fixed bugs found on the way:
+#   - the probe's boot timeout had been clobbered to 5s, so every 'hang' earlier in the
+#     investigation was the test giving up, not the kernel stopping.
+#   - the run loop treated HLT as end-of-boot; HLT is idle.
+
+# still open: with both gaps closed, 7.3.6 spins inside KVM at oom_init
+#   (initcall_debug: 'calling oom_init' then no return), exits frozen at 21476 over 90s,
+#   engine time 30ms. That is a guest-side loop with no device access, so the next step is to
+#   capture RIP at timeout and symbolize against vmlinux/System.map of the same build.

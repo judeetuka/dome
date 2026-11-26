@@ -38,6 +38,11 @@ pub enum VcpuStop {
     Shutdown,
     /// The guest called for an exit that needs no action; keep running.
     Continue,
+    /// An exit nobody claimed, with its raw reason code.
+    ///
+    /// Names matter here: a guest that spends its time on an exit type the engine never considered
+    /// looks exactly like a hang, and the only way to tell is to print the code.
+    Unhandled(u32),
 }
 
 /// Host-side handling for the guest's device accesses.
@@ -221,7 +226,7 @@ impl Vcpu {
             }
             kvm_ioctls::VcpuExit::Hlt => VcpuStop::Halted,
             kvm_ioctls::VcpuExit::Shutdown => VcpuStop::Shutdown,
-            _ => VcpuStop::Continue,
+            other => VcpuStop::Unhandled(exit_code(&other)),
         })
     }
 }
@@ -280,5 +285,33 @@ fn flat_data(selector: u16) -> kvm_segment {
         avl: 0,
         unusable: 0,
         padding: 0,
+    }
+}
+
+/// The exit reason as KVM numbers it.
+///
+/// kvm_ioctls turns the exit into an enum, so this is the reverse mapping for the cases the engine
+/// cares about plus a catch-all.
+fn exit_code(exit: &kvm_ioctls::VcpuExit<'_>) -> u32 {
+    use kvm_ioctls::VcpuExit as E;
+
+    match exit {
+        E::Exception => 0,
+        E::IoIn(_, _) => 2,
+        E::IoOut(_, _) => 3,
+        E::MmioRead(_, _) => 5,
+        E::MmioWrite(_, _) => 6,
+        E::Hlt => 10,
+        E::IrqWindowOpen => 12,
+        E::Shutdown => 8,
+        E::FailEntry(_, _) => 7,
+        E::Intr => 9,
+        E::Debug(_) => 4,
+        E::Hypercall(_) => 11,
+        E::IoapicEoi(_) => 1,
+        E::InternalError => 13,
+        E::SystemEvent(_, _) => 14,
+        E::S390Ucontrol => 15,
+        _ => 99,
     }
 }
