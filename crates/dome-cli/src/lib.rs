@@ -8,6 +8,7 @@ use dome_host_linux::{HostReport, ProbeRoot};
 pub mod chambers;
 pub mod foundation_build;
 pub mod kernel;
+pub mod kernel_build;
 pub mod packaging;
 pub mod release;
 pub mod shell;
@@ -255,6 +256,22 @@ enum ShellAction {
 
 #[derive(Debug, Subcommand)]
 enum KernelAction {
+    /// Build a kernel from source and install it as a profile
+    Build {
+        /// Kernel version, for example 7.3.6
+        #[arg(long, value_name = "VERSION", default_value = "7.3.6")]
+        version: String,
+        /// Profile name to install under
+        #[arg(long, value_name = "NAME", default_value = "dome-minimal")]
+        profile: String,
+        /// Parallel jobs
+        #[arg(long, value_name = "N")]
+        jobs: Option<u32>,
+        /// Where sources and tarballs live
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
+    },
+
     /// Install a kernel image under a profile name
     Import {
         /// Profile name, for example dome-minimal
@@ -491,6 +508,38 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
         }
 
         Commands::Kernel { action } => match action {
+            KernelAction::Build {
+                version,
+                profile,
+                jobs,
+                cache,
+            } => {
+                let cache = cache.unwrap_or_else(|| {
+                    let base = std::env::var("XDG_CACHE_HOME")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|_| {
+                            std::path::PathBuf::from(
+                                std::env::var("HOME").unwrap_or_else(|_| ".".to_owned()),
+                            )
+                            .join(".cache")
+                        });
+                    base.join("dome").join("kernels")
+                });
+
+                // The fragment ships with the workspace, so the build is described by the repo
+                // rather than by what someone did in a terminal once.
+                let fragment = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../kernels/dome-minimal.fragment");
+
+                kernel_build::build(&kernel_build::BuildOptions {
+                    version,
+                    profile,
+                    jobs,
+                    cache,
+                    fragment,
+                })
+                .map_err(CliError::Failed)
+            }
             KernelAction::Import { profile, from } => {
                 kernel::import(&kernel::kernel_root(), &profile, &from).map_err(CliError::Failed)
             }

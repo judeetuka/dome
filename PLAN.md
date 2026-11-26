@@ -1,5 +1,12 @@
 # Dome — Full Implementation Plan (M1→M9)
 
+## Tracking
+
+The task state lives in the **Timeline** (tree tree-f62490d852408070): every wave from
+Wave 0 to the final reviews, every task, and a report on each of what was done, what the evidence
+is, and what it does not cover. This document stays the argument; the timeline is the state. When
+a task is added here, it is added there in the same sitting, or tracking drifts.
+
 ## TL;DR
 
 > **Quick Summary**: Evolve Dome from a read-only capability probe (M1 done) to a complete multi-platform sandbox engine. Build the `.dome` binary format, a Linux KVM engine, chamber lifecycle, OS builder, sentinel protocol, hardware apertures, and cross-platform engines — in 9 milestone waves with TDD at every step.

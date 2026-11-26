@@ -1,0 +1,44 @@
+# Dome foundation kernel: what a chamber actually has.
+#
+# Applied on top of defconfig by dome kernel build. Every line here came from something that
+# failed: see docs/kernel.md.
+
+# The transport every device hangs off.
+CONFIG_VIRTIO=y
+CONFIG_VIRTIO_MMIO=y
+# Without this the virtio_mmio.device= parameter does not exist and the device is never probed.
+CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y
+
+# The network card, compiled in: a module is a file to place and a version to match.
+CONFIG_VIRTIO_NET=y
+CONFIG_NETDEVICES=y
+CONFIG_NET=y
+CONFIG_INET=y
+
+# Static addressing from the command line, so no DHCP client is needed in userspace.
+CONFIG_IP_PNP=y
+# CONFIG_IP_PNP_DHCP is not set
+
+# /dev at boot, or init has no console and its output goes to /dev/null.
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+
+# A #! script as init or workload.
+CONFIG_BINFMT_SCRIPT=y
+
+# The console, and an initramfs to hold the foundation.
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_GZIP=y
+
+# Nothing that loads anything, and warnings that are not errors: GCC 16 is newer than the
+# kernel's warning discipline, and a warning is not a reason to refuse to build.
+# CONFIG_MODULES is not set
+# CONFIG_WERROR is not set
+
+# A chamber has no graphics console, no wireless hardware and no network logging.
+# CONFIG_CFG80211 is not set
+# CONFIG_NETCONSOLE is not set
+# CONFIG_SOUND is not set
+# CONFIG_DRM is not set

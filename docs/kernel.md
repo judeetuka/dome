@@ -41,7 +41,30 @@ Every row came from something that failed during M5 rather than from a specifica
 - **The distribution's keyring**: a foundation trusts what its seal says, not what a distro signed.
 - **Filesystems a chamber cannot use**: each one is a parser reachable from guest-controlled bytes.
 
+## Which version
+
+**Latest stable by default.** A sandbox is not a server: newer kernels bring device and
+virtualisation fixes that matter more to a VMM than the conservative stability of an LTS line,
+and Dome pins the version explicitly rather than following a moving target.
+
+| Line | Use |
+| --- | --- |
+| latest stable (7.3.6) | the default profile |
+| longterm (6.18.x, 6.12.x) | offered behind `--version` for whoever needs a fixed line |
+
+The version is a value in the profile, not a floating pointer: a foundation records what it was
+built with, so two images built a month apart are comparable.
+
 ## Reproducing a build
+
+One command does the whole thing: fetch, configure from the checked-in fragment, build, install as
+a profile.
+
+```
+dome kernel build --version 7.3.6 --profile dome-minimal
+```
+
+The long form, for anyone who wants to see the steps:
 
 ```
 cd linux-6.12
