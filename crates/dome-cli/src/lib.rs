@@ -438,6 +438,14 @@ fn dispatch(command: Commands) -> Result<String, CliError> {
             options.initramfs = initramfs;
             options.memory_mib = memory_mib;
             options.timeout = std::time::Duration::from_secs(timeout);
+
+            // The blueprint says how many CPUs it wants; the command refuses when that is more
+            // than the engine can describe to the guest.
+            if let Ok(text) = std::fs::read_to_string(&cell)
+                && let Ok(blueprint) = dome_config::Blueprint::from_toml(&text)
+            {
+                options.cpus = Some(blueprint.cell().limits().cpus().get());
+            }
             if let Some(root) = foundations {
                 options.foundation_root = root;
             }

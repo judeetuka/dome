@@ -40,6 +40,12 @@ pub struct RunOptions {
     pub initramfs: Option<PathBuf>,
     /// Guest memory in MiB.
     pub memory_mib: u64,
+    /// CPUs the blueprint asked for.
+    ///
+    /// Carried so the command can refuse a request the engine cannot honour. A chamber gets one
+    /// vCPU: the engine describes no CPU topology, and a kernel told it has more CPUs than exist
+    /// waits forever for processors that never arrive.
+    pub cpus: Option<u16>,
     /// Wall-clock limit for this chamber.
     pub timeout: Duration,
     /// Where the registry and logs live.
@@ -63,6 +69,7 @@ impl RunOptions {
             kernel: None,
             initramfs: None,
             memory_mib: 64,
+            cpus: None,
             timeout: Duration::from_secs(3600),
             state_root: state_root.into(),
             foundation_root: foundation_root(),
@@ -88,6 +95,18 @@ impl RunOptions {
 /// the chamber keeps running. That child is the chamber.
 pub fn start(options: &RunOptions) -> Result<String, String> {
     let id = options.chamber_id()?;
+    // A chamber gets one vCPU: the engine describes no CPU topology to the guest, and a kernel
+    // told it has more CPUs than exist waits forever for processors that never arrive. Saying so
+    // is better than starting something that cannot work.
+    if let Some(cpus) = options.cpus
+        && cpus > 1
+    {
+        return Err(format!(
+            "this chamber asks for {cpus} CPUs and the engine provides a single vCPU; \
+             multi-CPU needs an APIC description the engine does not yet give a guest"
+        ));
+    }
+
     let registry = Registry::at(options.state_root.join("chambers"));
 
     let (existing, running) = match registry.get(&id).map_err(|error| error.to_string())? {

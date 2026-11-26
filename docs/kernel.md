@@ -67,6 +67,31 @@ to read the wall clock from.
 
 Until the engine can describe an APIC and a CPU topology to the guest, one CPU is the honest
 configuration, and it is stated in the fragment rather than left to a default.
+## A kernel from the future
+
+The engine does not know about kernel versions, and it should not: it knows what a guest has to
+do to be usable here, and every one of those is a line in a test.
+
+```text
+DOME_KERNEL_PROFILE=dome-minimal cargo test -p dome-cli --test kernel_conformance
+```
+
+It boots the profile and checks the contract: the virtio device is found, the network comes up at
+10.0.2.15, and init runs. A future kernel either passes or names the part that moved, so trying a
+new version is a command rather than a support promise. Nothing in the engine encodes a version
+number.
+
+Two engine gaps were found by exactly this exercise and are now fixed rather than documented as
+requirements: an unowned I/O port has to float high, and a CMOS RTC has to exist. Those are
+properties of a PC, not of a kernel version, which is why fixing them removed a class of future
+breakage instead of adding a compatibility note.
+
+### What still has to be asked for by hand
+
+One thing is not a version problem and is stated in the fragment: `# CONFIG_SMP is not set`. A
+SMP kernel asks ACPI or an MP table which CPUs exist, and the engine describes neither. Until it
+does, a kernel built with SMP hangs, whatever its version.
+
 ## Reproducing a build
 
 One command does the whole thing: fetch, configure from the checked-in fragment, build, install as

@@ -1,0 +1,16 @@
+# a kernel from the future
+
+# what the engine needs, as a command:
+#   DOME_KERNEL_PROFILE=<profile> cargo test -p dome-cli --test kernel_conformance
+# checks: virtio device found / eth0 up at 10.0.2.15 / init runs.
+# no kernel version appears anywhere in the engine.
+
+# what is still a manual requirement, and why:
+#   # CONFIG_SMP is not set   - the engine describes no CPU topology (no MADT, no APIC)
+
+# what a chamber may ask for today:
+#   memory_mib   honoured (MemorySize)
+#   storage_mib  parsed, unused until a disk device exists
+#   cpus         parsed; >1 refused with the reason, because one vCPU is all the engine
+#                can describe to a guest
+#   gpu/display  no device yet; T79 tracks virtio-gpu, which T36 needs before RFB can exist

@@ -123,10 +123,33 @@ fn run_bootstrap() {
 
     say(&format!("fetching {url}"));
 
-    let fetched = std::process::Command::new("/usr/bin/dome-fetch")
-        .arg(&url)
-        .arg("/run/installer")
-        .status();
+    // A tty write from userspace needs the serial transmitter interrupt, and the engine does not
+    // deliver one yet; /dev/kmsg does not. Until that is fixed, the fetcher and the installer speak
+    // through the kernel log, which is the channel we know works.
+    match std::fs::read_to_string("/etc/resolv.conf") {
+        Ok(text) => say(&format!("resolv.conf contains {text:?}")),
+        Err(error) => say(&format!("cannot read /etc/resolv.conf: {error}")),
+    }
+
+    let log = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/kmsg")
+        .ok();
+    let mut command = std::process::Command::new("/usr/bin/dome-fetch");
+    command.arg(&url).arg("/run/installer");
+
+    if let Some(log) = log.as_ref() {
+        command.stdout(
+            log.try_clone()
+                .unwrap_or_else(|_| log.try_clone().expect("clone")),
+        );
+        command.stderr(
+            log.try_clone()
+                .unwrap_or_else(|_| log.try_clone().expect("clone")),
+        );
+    }
+
+    let fetched = command.status();
 
     match fetched {
         Ok(status) if status.success() => {}

@@ -112,8 +112,10 @@ fn a_guest_frame_reaches_the_network() {
     let memory = memory();
     let mut device = VirtioNet::new(FakeNetwork::new());
 
-    // The guest writes a frame into a buffer and offers that descriptor.
-    let frame = b"a frame from the guest".to_vec();
+    // The guest writes a virtio header and then a frame into one buffer.
+    let payload = b"a frame from the guest".to_vec();
+    let mut frame = vec![0u8; 12];
+    frame.extend_from_slice(&payload);
     memory
         .map()
         .write_slice(&frame, GuestAddress(BUFFER))
@@ -123,7 +125,7 @@ fn a_guest_frame_reaches_the_network() {
 
     assert!(device.notify(TX_QUEUE, queue_state(), &memory));
 
-    assert_eq!(device.backend().transmitted, vec![frame]);
+    assert_eq!(device.backend().transmitted, vec![payload]);
     assert_eq!(
         used_index(&memory),
         1,
@@ -144,12 +146,23 @@ fn a_frame_from_the_network_lands_in_the_guest_buffer() {
 
     device.notify(RX_QUEUE, queue_state(), &memory);
 
-    let mut buffer = vec![0u8; 7];
+    // The frame arrives behind the virtio header the driver expects in front of every packet.
+    let mut buffer = vec![0u8; 19];
     memory
         .map()
         .read_slice(&mut buffer, GuestAddress(BUFFER))
         .expect("buffer");
-    assert_eq!(buffer, b"inbound");
+    assert_eq!(
+        &buffer[..10],
+        &[0u8; 10],
+        "no offload is offered, so flags and lengths are zero"
+    );
+    assert_eq!(
+        &buffer[10..12],
+        &1u16.to_le_bytes(),
+        "one buffer holds the frame"
+    );
+    assert_eq!(&buffer[12..], b"inbound");
     assert_eq!(used_index(&memory), 1);
 }
 
@@ -255,7 +268,9 @@ fn the_transport_routes_a_doorbell_to_the_network_device() {
     transport.write_u32(reg::QUEUE_DEVICE_LOW, USED_RING as u32);
     transport.write_u32(reg::QUEUE_READY, 1);
 
-    let frame = b"through the transport".to_vec();
+    let payload = b"through the transport".to_vec();
+    let mut frame = vec![0u8; 12];
+    frame.extend_from_slice(&payload);
     memory
         .map()
         .write_slice(&frame, GuestAddress(BUFFER))
@@ -267,6 +282,6 @@ fn the_transport_routes_a_doorbell_to_the_network_device() {
     let queue = transport.take_doorbell().expect("pending");
     transport.service_doorbell(queue, &memory);
 
-    assert_eq!(transport.backend().backend().transmitted, vec![frame]);
+    assert_eq!(transport.backend().backend().transmitted, vec![payload]);
     let _ = ChamberIo::with_console();
 }

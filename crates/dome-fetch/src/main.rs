@@ -10,6 +10,14 @@
 use std::io::Write;
 
 fn main() {
+    eprintln!("dome-fetch: starting");
+
+    // A raw question to the resolver, so "the network is broken" and "the resolver library is
+    // broken" cannot be confused: this sends the bytes itself and reports what came back.
+    if std::env::args().any(|argument| argument == "--dns-probe") {
+        probe_dns();
+        return;
+    }
     let mut args = std::env::args().skip(1);
     let (Some(url), Some(destination)) = (args.next(), args.next()) else {
         eprintln!("usage: dome-fetch <url> <destination>");
@@ -68,4 +76,44 @@ fn fetch(url: &str, destination: &str) -> Result<usize, String> {
         .map_err(|error| format!("cannot flush {destination}: {error}"))?;
 
     Ok(bytes as usize)
+}
+
+/// Ask the resolver for a name over UDP, without the resolver library.
+fn probe_dns() {
+    use std::net::{SocketAddr, UdpSocket};
+
+    // The smallest useful question: one name, type A, class IN.
+    let mut query = vec![
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    for label in "mise.run".split('.') {
+        query.push(label.len() as u8);
+        query.extend_from_slice(label.as_bytes());
+    }
+    query.extend_from_slice(&[0x00, 0x00, 0x01, 0x00, 0x01]);
+
+    let socket = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(socket) => socket,
+        Err(error) => {
+            eprintln!("dns-probe: cannot bind: {error}");
+            return;
+        }
+    };
+
+    let _ = socket.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+    let resolver: SocketAddr = "10.0.2.3:53".parse().expect("resolver address");
+
+    match socket.send_to(&query, resolver) {
+        Ok(sent) => eprintln!("dns-probe: sent {sent} bytes to {resolver}"),
+        Err(error) => {
+            eprintln!("dns-probe: send failed: {error}");
+            return;
+        }
+    }
+
+    let mut answer = [0u8; 512];
+    match socket.recv_from(&mut answer) {
+        Ok((read, from)) => eprintln!("dns-probe: {read} bytes from {from}"),
+        Err(error) => eprintln!("dns-probe: no answer: {error}"),
+    }
 }

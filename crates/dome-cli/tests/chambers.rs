@@ -181,3 +181,18 @@ fn the_chamber_body_boots_a_real_kernel() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_chamber_asking_for_more_cpus_than_the_engine_describes_is_refused() {
+    let dir = scratch("cpus");
+    let cell = write_cell(&dir);
+
+    let mut options = RunOptions::new(&cell, &dir);
+    options.cpus = Some(2);
+
+    // A refusal that says why is better than a chamber that starts and waits forever for a CPU
+    // the engine never describes.
+    let error = start(&options).expect_err("two CPUs cannot be provided");
+    assert!(error.contains("single vCPU"), "{error}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

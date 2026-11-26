@@ -56,11 +56,18 @@ fn the_fetcher_explains_itself_inside_the_chamber() {
             std::fs::read(&fetcher).expect("fetch"),
         ))
         .expect("fetch");
+    let script = [
+        "#!/bin/bash",
+        "echo DIAG-SHELL-RAN >/dev/ttyS0",
+        "echo DIAG-ARGS $0 $# >/dev/ttyS0",
+        "/usr/bin/dome-fetch --dns-probe",
+        "echo DIAG-FETCH-EXIT $? >/dev/ttyS0",
+        "read -r line",
+    ]
+    .join("\n");
+
     image
-        .add(Entry::executable(
-            "workload",
-            std::fs::read(&bash).expect("bash"),
-        ))
+        .add(Entry::executable("workload", script.into_bytes()))
         .expect("workload");
     image
         .add(Entry::file(

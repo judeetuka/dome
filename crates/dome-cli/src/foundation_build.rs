@@ -19,6 +19,10 @@ use dome_image::initramfs::{Entry, Initramfs};
 /// The file a foundation ships as its kernel.
 pub const FOUNDATION_KERNEL: &str = "vmlinuz";
 /// The file a foundation ships as its initramfs.
+/// The resolver a chamber is told about; the user-mode network answers DNS there.
+const RESOLVER: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 2, 3);
+
+/// The name of the initramfs inside a foundation.
 pub const FOUNDATION_INITRAMFS: &str = "initramfs.cpio.gz";
 
 /// Where a workload embedded in an image is placed.
@@ -180,6 +184,16 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
 
         image
             .add(Entry::file("etc/dome/bootstrap", manifest.into_bytes()))
+            .map_err(|error| error.to_string())?;
+
+        // Without a resolver the guest sends its DNS question to 127.0.0.1, which is nobody, and
+        // the only symptom is a five second pause and "cannot resolve" - no packet ever leaves the
+        // machine, so the network looks broken when only this file was missing.
+        image
+            .add(Entry::file(
+                "etc/resolv.conf",
+                format!("nameserver {RESOLVER}\n").into_bytes(),
+            ))
             .map_err(|error| error.to_string())?;
     }
 

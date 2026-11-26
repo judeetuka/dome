@@ -208,8 +208,35 @@ impl NetworkBackend for UserNetBackend {
     }
 
     fn transmit(&mut self, frame: &[u8]) {
-        if let dome_net::nat::Disposition::Reply(frames) = self.net.handle(frame) {
-            self.outbox.extend(frames);
+        let debug = std::env::var("DOME_NET_DEBUG").is_ok();
+
+        match self.net.handle(frame) {
+            dome_net::nat::Disposition::Reply(frames) => {
+                if debug {
+                    eprintln!(
+                        "net: frame in {} bytes -> {} replies",
+                        frame.len(),
+                        frames.len()
+                    );
+                }
+                self.outbox.extend(frames);
+            }
+            dome_net::nat::Disposition::Drop => {
+                if debug {
+                    // The ethertype and the first bytes say what kind of packet it was.
+                    let kind = frame
+                        .get(12..14)
+                        .map(|b| u16::from_be_bytes([b[0], b[1]]))
+                        .unwrap_or(0);
+                    let head: Vec<String> =
+                        frame.iter().take(42).map(|b| format!("{b:02x}")).collect();
+                    eprintln!(
+                        "net: frame in {} bytes, dropped (ethertype {kind:#06x}): {}",
+                        frame.len(),
+                        head.join(" ")
+                    );
+                }
+            }
         }
     }
 

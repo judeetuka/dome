@@ -26,10 +26,25 @@ pub mod features {
     pub const MAC: u64 = 1 << 5;
     /// The device can report link status.
     pub const STATUS: u64 = 1 << 16;
+    /// Receive buffers carry a buffer count, which makes the header twelve bytes.
+    ///
+    /// Offered because the driver uses a twelve-byte header when it sees this feature, and the
+    /// engine has to agree with the driver rather than guess: reading a twelve-byte header as ten
+    /// shifted every frame by two bytes, and the symptom was silence - packets with an ethertype
+    /// nobody had heard of, dropped without a word.
+    pub const MRG_RXBUF: u64 = 1 << 15;
 }
 
 /// Size of one descriptor record in the table.
 const DESCRIPTOR_SIZE: u16 = 16;
+
+/// Length of the virtio network header that precedes every frame.
+///
+/// This is not optional and not part of the frame: with VIRTIO_F_VERSION_1 the driver always
+/// writes it, so a device that treats the buffer as a bare Ethernet frame parses ten bytes of
+/// header as the destination address. The symptom is not an error but silence: every packet
+/// arrives with an unknown ethertype and is dropped.
+const VIRTIO_NET_HDR_LEN: usize = 12;
 
 /// What a network backend does with frames.
 ///
@@ -54,6 +69,13 @@ pub trait NetworkBackend {
 /// A virtio network device.
 pub struct VirtioNet<B: NetworkBackend> {
     backend: B,
+    /// The receive queue as the driver last configured it.
+    ///
+    /// A reply to a transmitted frame arrives after the transmit, and the driver has no reason to
+    /// ring the receive doorbell again: it already offered its buffers. Without remembering the
+    /// queue, the reply sits in the backend while the guest waits for it - which looked like DNS
+    /// silently failing inside a chamber.
+    rx_state: Option<QueueState>,
     rx_last_available: u16,
     tx_last_available: u16,
     rx_used: u16,
@@ -65,6 +87,7 @@ impl<B: NetworkBackend> VirtioNet<B> {
     pub fn new(backend: B) -> Self {
         Self {
             backend,
+            rx_state: None,
             rx_last_available: 0,
             tx_last_available: 0,
             rx_used: 0,
@@ -93,7 +116,15 @@ impl<B: NetworkBackend> VirtioNet<B> {
                 continue;
             };
 
-            self.backend.transmit(&frame);
+            if std::env::var("DOME_NET_DEBUG").is_ok() {
+                let head: Vec<String> = frame.iter().take(24).map(|b| format!("{b:02x}")).collect();
+                eprintln!("net: buffer {} bytes: {}", frame.len(), head.join(" "));
+            }
+
+            // The header is the driver's, not the network's.
+            if frame.len() > VIRTIO_NET_HDR_LEN {
+                self.backend.transmit(&frame[VIRTIO_NET_HDR_LEN..]);
+            }
 
             self.tx_used = push_used(memory, state, self.tx_used, head, 0);
         }
@@ -118,20 +149,28 @@ impl<B: NetworkBackend> VirtioNet<B> {
                 return;
             };
 
-            if frame.len() > buffer.length as usize {
+            // Room for the header the driver expects in front of the frame.
+            let total = VIRTIO_NET_HDR_LEN + frame.len();
+            if total > buffer.length as usize {
                 continue;
             }
 
+            // The header is zeroed except for the buffer count: no checksum offload is offered,
+            // and one buffer holds one frame.
+            let mut packet = vec![0u8; VIRTIO_NET_HDR_LEN];
+            packet[VIRTIO_NET_HDR_LEN - 2..].copy_from_slice(&1u16.to_le_bytes());
+            packet.extend_from_slice(&frame);
+
             if memory
                 .map()
-                .write_slice(&frame, GuestAddress(buffer.address))
+                .write_slice(&packet, GuestAddress(buffer.address))
                 .is_err()
             {
                 return;
             }
 
             self.rx_last_available = available_index;
-            self.rx_used = push_used(memory, state, self.rx_used, head, frame.len() as u32);
+            self.rx_used = push_used(memory, state, self.rx_used, head, total as u32);
         }
     }
 }
@@ -165,8 +204,19 @@ impl<B: NetworkBackend> VirtioBackend for VirtioNet<B> {
 
     fn notify(&mut self, queue: u16, state: QueueState, memory: &GuestMemory) -> bool {
         match queue {
-            TX_QUEUE => self.drain_transmit(state, memory),
-            RX_QUEUE => self.fill_receive(state, memory),
+            TX_QUEUE => {
+                self.drain_transmit(state, memory);
+
+                // Whatever the network said in reply goes into the buffers the driver already
+                // offered. The driver will not ring the receive doorbell for this.
+                if let Some(rx) = self.rx_state {
+                    self.fill_receive(rx, memory);
+                }
+            }
+            RX_QUEUE => {
+                self.rx_state = Some(state);
+                self.fill_receive(state, memory);
+            }
             _ => return false,
         }
 
