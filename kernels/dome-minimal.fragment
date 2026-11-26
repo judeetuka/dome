@@ -32,6 +32,16 @@ CONFIG_SERIAL_8250_CONSOLE=y
 CONFIG_BLK_DEV_INITRD=y
 CONFIG_RD_GZIP=y
 
+# One CPU, because that is what the chamber has been given.
+#
+# Measured, and the single most important line here: with CONFIG_SMP=y a kernel enumerates its
+# CPUs from ACPI or MP tables. The engine provides neither yet, so the guest never learns its
+# topology and hangs at the first wait on a kernel thread (initcall_debug stops at oom_init,
+# with the vCPU spinning and no device access). With SMP off the same kernel boots in under a
+# second, brings up eth0 and runs init.
+#
+# CONFIG_SMP is not set
+
 # Nothing that loads anything, and warnings that are not errors: GCC 16 is newer than the
 # kernel's warning discipline, and a warning is not a reason to refuse to build.
 # CONFIG_MODULES is not set

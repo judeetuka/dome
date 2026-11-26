@@ -57,6 +57,9 @@ fn the_checked_in_fragment_covers_what_a_chamber_needs() {
         "CONFIG_SERIAL_8250_CONSOLE=y",
         "CONFIG_BLK_DEV_INITRD=y",
         "# CONFIG_MODULES is not set",
+        // A kernel that believes in SMP hangs in a chamber, because the engine does not yet give
+        // it an APIC or MP topology to enumerate.
+        "# CONFIG_SMP is not set",
     ] {
         assert!(
             fragment.contains(required),

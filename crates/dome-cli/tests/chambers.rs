@@ -100,7 +100,10 @@ fn starting_a_chamber_twice_is_refused_while_it_runs() {
     // the assertion is about instead of assuming it is already true.
     let mut observed = false;
     for _ in 0..100 {
-        if list(&dir).map(|report| report.contains("running")).unwrap_or(false) {
+        if list(&dir)
+            .map(|report| report.contains("running"))
+            .unwrap_or(false)
+        {
             observed = true;
             break;
         }

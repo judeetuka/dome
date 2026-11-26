@@ -43,23 +43,30 @@ Every row came from something that failed during M5 rather than from a specifica
 
 ## Which version
 
-**Latest stable that boots, longterm as the fallback** - and the gap between those two is stated
-rather than glossed.
-| Line | Builds | Boots on our vCPU | Used now |
-| --- | --- | --- | --- |
-| 6.12.x (longterm) | yes, 7.34 MB | **yes** - device found, eth0 up, init runs | **yes** |
-| 7.3.6 (latest stable) | yes, 11.69 MB | no - stalls before init | no |
+**Latest stable.** 7.3.6, built here, boots a chamber: the device registers, eth0 comes up at
+10.0.2.15, and the guest sends ARP for its gateway. No distribution kernel, no modules.
 
-The 7.3.6 build stops at the same place every time, right after `kprobes: kprobe
-jump-optimization is enabled`, with no panic and no further output. `ibt=off` does not change it,
-so CET is not the cause. The two candidates worth testing next are `CONFIG_SMP=n` (which the
-6.12 build tolerated and a 7.x kernel may not) and a newer initcall that needs something the
-trimmed config drops. Until one of them is proven, the profile ships the kernel that boots -
-because a version number is not worth a chamber that cannot start.
+| Line | Boots | Notes |
+| --- | --- | --- |
+| 7.3.6 (latest stable) | **yes** | the default profile |
+| 6.12.119 (longterm) | yes | offered with `--version` for a fixed line |
 
-Both are built by the same command, so the comparison is one flag:
+### The one line that decides whether a kernel boots
 
-`dome kernel build --version 7.3.6 --profile dome-test`
+`# CONFIG_SMP is not set`
+
+With SMP on, a kernel enumerates CPUs from ACPI or MP tables. The engine provides neither yet, so
+the guest never learns its topology and **hangs at the first wait on a kernel thread**. That is
+what looked like a version incompatibility: initcall_debug stops at `oom_init`, the vCPU spins
+with no device access, and a newer kernel logs enough on the way that it looked like a slow boot
+rather than a stuck one.
+
+Two earlier findings were real prerequisites and are fixed: an unowned I/O port returned zero,
+which a driver reads as "device present, nothing to report", and there was no CMOS RTC for a kernel
+to read the wall clock from.
+
+Until the engine can describe an APIC and a CPU topology to the guest, one CPU is the honest
+configuration, and it is stated in the fragment rather than left to a default.
 ## Reproducing a build
 
 One command does the whole thing: fetch, configure from the checked-in fragment, build, install as

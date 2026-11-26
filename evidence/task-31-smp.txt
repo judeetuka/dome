@@ -1,0 +1,17 @@
+# the line that decides whether a kernel boots in a chamber
+
+# measured, same build, one config difference:
+#   CONFIG_SMP=y -> initcall_debug: 'calling oom_init' and never returns;
+#                   vCPU spins inside KVM, no device access, exits frozen at 21476 over 90s.
+#   CONFIG_SMP is not set -> boot completes: device registered, eth0 up, 8 ARP frames.
+
+# why: a kernel with SMP asks ACPI or an MP table which CPUs exist. The engine provides
+# neither, so the guest never learns its topology and waits forever on a kernel thread.
+
+# current profile:
+#   ~/.local/share/dome/kernels/dome-minimal/vmlinuz   7.3.6   11,330,560 bytes   no modules
+#   built by: dome kernel build --version 7.3.6 --profile dome-minimal
+
+# two prerequisites found on the way and fixed:
+#   - an unowned I/O port returned 0x00; real hardware floats high (ChamberIo::with_floating_bus)
+#   - there was no CMOS RTC, so the kernel polled status register A 40,000 times

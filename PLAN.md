@@ -2647,10 +2647,14 @@ Max Concurrent: 6 (M1 wave)
   > kernel has the first and the last, ships the second as a module, and hangs on `ip=` because
   > the interface never appears.
 
-  > **Version policy: latest stable that boots.** 7.3.6 builds (11.69 MB) but stalls before init,
-  > after `kprobes: kprobe jump-optimization is enabled`; `ibt=off` does not change it. 6.12 LTS
-  > boots, so 6.12 is what the profile ships until the 7.x stall is understood. Both are built by
-  > the same command, so comparing them is one flag.
+  > **Latest stable, and it boots.** 7.3.6 is the shipped profile: 11.33 MB, no modules, the
+  > device registers, eth0 comes up at 10.0.2.15 and the guest sends ARP.
+  >
+  > The blocker was one line: `# CONFIG_SMP is not set`. With SMP on, a kernel enumerates CPUs
+  > from ACPI or MP tables, which the engine does not provide, so the guest hangs at the first
+  > wait on a kernel thread (initcall_debug stops at `oom_init` with the vCPU spinning). Two
+  > real prerequisites came out of the hunt: unowned I/O ports must float high, and a CMOS RTC
+  > has to exist.
   >
   > **A real kernel now exists.** Upstream Linux 6.12, built here, 7,336,960 bytes - smaller than
   > the 11.7 MB Alpine fixture and with no modules at all. Installed as the `dome-minimal` profile.
