@@ -300,9 +300,20 @@ impl LinuxEngine {
 
         while exits < MAX_EXITS {
             match vcpu.run_once(&mut io) {
-                Ok(VcpuStop::Halted | VcpuStop::Shutdown) => {
+                Ok(VcpuStop::Shutdown) => {
                     stopped = true;
                     break;
+                }
+                Ok(VcpuStop::Halted) => {
+                    // HLT is the guest saying "nothing to do until something happens", not "I am
+                    // finished". Treating it as the end of the run truncated every boot the moment
+                    // a process blocked on input - which looked like a silent userspace.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    io.service_pending(&memory);
+
+                    if let Some(line) = interrupt_line.as_mut() {
+                        line.service(io.interrupt_pending());
+                    }
                 }
                 Ok(VcpuStop::Continue) => {
                     // A write may have rung a doorbell; only this loop has the memory a device

@@ -816,13 +816,17 @@ impl Recipe {
             }
         }
 
-        if let Some(shell) = &self.shell
-            && !shell.packages.contains(&shell.default)
-        {
-            return Err(ConfigError::InvalidValue {
-                field: "shell.default",
-                reason: format!("{:?} is not among the shell packages", shell.default),
-            });
+        if let Some(shell) = &self.shell {
+            // A shell is resolved from a profile, the same way a kernel is: the name is a profile
+            // the builder looks up, and the package list is what the chamber would install for a
+            // shell it does not already carry. Requiring the profile to appear in that list was a
+            // rule from the days when a shell could only arrive as a package.
+            if shell.default.trim().is_empty() {
+                return Err(ConfigError::InvalidValue {
+                    field: "shell.default",
+                    reason: "a shell needs a name".to_owned(),
+                });
+            }
         }
 
         if let UserSpec::Custom { home, .. } = &self.user

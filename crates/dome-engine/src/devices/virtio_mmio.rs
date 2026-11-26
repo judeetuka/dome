@@ -89,6 +89,17 @@ pub mod interrupt {
 /// Largest queue this transport accepts.
 pub const QUEUE_NUM_MAX: u32 = 256;
 
+/// Feature bits the transport itself requires.
+pub mod transport_features {
+    /// The device is modern (version 2), so it must offer this.
+    ///
+    /// A driver that finds a version 2 transport without this bit refuses to bind: the protocol
+    /// assumes little-endian, access-plumbing-free operation, and the bit is how the device says
+    /// so. Omitting it produces "probe with driver failed with error -22", which reads like a
+    /// configuration mistake and is actually a missing constant.
+    pub const VERSION_1: u64 = 1 << 32;
+}
+
 /// One entry of the descriptor table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Descriptor {

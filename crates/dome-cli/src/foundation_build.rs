@@ -153,6 +153,14 @@ pub fn build(options: &BuildOptions) -> Result<String, String> {
     }
 
     if let Some((_, bytes)) = bootstrap.as_ref() {
+        // Parents first: the kernel's initramfs unpacker writes a file where the archive says,
+        // and does not invent the directories above it.
+        for directory in ["usr", "usr/bin", "etc", "etc/dome"] {
+            image
+                .add(Entry::directory(directory))
+                .map_err(|error| error.to_string())?;
+        }
+
         image
             .add(Entry::executable("usr/bin/dome-fetch", bytes.clone()))
             .map_err(|error| error.to_string())?;

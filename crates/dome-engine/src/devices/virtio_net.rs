@@ -142,7 +142,9 @@ impl<B: NetworkBackend> VirtioBackend for VirtioNet<B> {
     }
 
     fn device_features(&self) -> u64 {
-        features::MAC | features::STATUS
+        crate::devices::virtio_mmio::transport_features::VERSION_1
+            | features::MAC
+            | features::STATUS
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {

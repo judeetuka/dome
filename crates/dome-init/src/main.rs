@@ -157,6 +157,34 @@ fn run_bootstrap() {
 /// /dev/console is the kernel's own console and works before anything else is mounted; stdout
 /// is a fallback for a run where the console device is absent.
 fn say(message: &str) {
+    // One-time diagnosis of the console device: if opening it fails, everything a workload prints
+    // disappears without an error anywhere.
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let state = match std::fs::OpenOptions::new().write(true).open("/dev/console") {
+            Ok(_) => "console-open-ok".to_owned(),
+            Err(error) => format!("console-open-failed: {error}"),
+        };
+
+        if let Ok(mut kmsg) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+            let _ = kmsg.write_all(format!("dome-init: {state}\n").as_bytes());
+        }
+
+        let listing = std::fs::read_dir("/dev")
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_else(|error| format!("unreadable: {error}"));
+
+        if let Ok(mut kmsg) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+            let _ = kmsg.write_all(format!("dome-init: /dev contains {listing}\n").as_bytes());
+        }
+    });
+
     let line = format!("{message}\n");
 
     if let Ok(mut console) = std::fs::OpenOptions::new().write(true).open("/dev/console") {

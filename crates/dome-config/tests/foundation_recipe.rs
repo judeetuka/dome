@@ -108,19 +108,16 @@ fn an_empty_pin_is_refused() {
 }
 
 #[test]
-fn the_default_shell_must_be_installed() {
+fn a_shell_needs_a_name() {
+    // The shell is resolved from a profile the builder looks up, so the rule is about the name,
+    // not about whether the package list happens to contain it.
     let error = Recipe::from_toml(
-        "[foundation]\nname = \"app\"\n\n[shell]\ndefault = \"zsh\"\npackages = [\"fish\"]\n",
+        "[foundation]\nname = \"app\"\ninit = \"sentinel\"\n\n[shell]\ndefault = \"  \"\n",
     )
     .unwrap_err();
 
-    assert!(
-        error.to_string().contains("not among the shell packages"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("needs a name"), "{error}");
 }
-
-// --- static linking ---
 
 #[test]
 fn static_linking_is_the_default_and_needs_nothing() {

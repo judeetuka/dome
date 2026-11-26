@@ -26,7 +26,35 @@ fn main() {
 }
 
 fn fetch(url: &str, destination: &str) -> Result<usize, String> {
-    let response = ureq::get(url).call().map_err(|error| error.to_string())?;
+    // Staged reporting on stderr: when this runs inside a chamber, "it failed" is not enough to
+    // tell a name that did not resolve from a connection that was refused.
+    eprintln!("dome-fetch: url {url}");
+
+    let host = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .and_then(|rest| rest.split(['/', ':']).next())
+        .unwrap_or(url);
+
+    match std::net::ToSocketAddrs::to_socket_addrs(&(host, 443)) {
+        Ok(addresses) => {
+            let resolved: Vec<String> = addresses.map(|address| address.to_string()).collect();
+            eprintln!("dome-fetch: resolved {host} to {}", resolved.join(", "));
+        }
+        Err(error) => {
+            eprintln!("dome-fetch: cannot resolve {host}: {error}");
+            return Err(format!("cannot resolve {host}: {error}"));
+        }
+    }
+
+    eprintln!("dome-fetch: requesting");
+
+    let response = ureq::get(url).call().map_err(|error| {
+        eprintln!("dome-fetch: request failed: {error}");
+        error.to_string()
+    })?;
+
+    eprintln!("dome-fetch: response received");
 
     let mut body = response.into_body();
     let mut reader = body.as_reader();

@@ -43,7 +43,7 @@ verification is reproducible from a clean checkout.
 | M9 ARM64 | T49–T52 | not started |
 | Hardening + release | T53–T58, T66 | not started |
 
-**Verified state of the tree**: 426 tests passing
+**Verified state of the tree**: 427 tests passing
 
 **Bookkeeping sweep (2026).** 56 acceptance criteria inside completed tasks had never been
 ticked, even though the work and its evidence existed. They are now checked, each verified
@@ -2640,6 +2640,32 @@ Max Concurrent: 6 (M1 wave)
   > kernel has the first and the last, ships the second as a module, and hangs on `ip=` because
   > the interface never appears.
 
+  > **A real kernel now exists.** Upstream Linux 6.12, built here, 7,336,960 bytes - smaller than
+  > the 11.7 MB Alpine fixture and with no modules at all. Installed as the `dome-minimal` profile.
+  >
+  > It boots, finds the network device, binds `virtio_net`, and configures the interface from the
+  > command line:
+  >
+  > `virtio-mmio: Registering device virtio-mmio.0 at 0xd0000000-0xd0000fff, IRQ 5.`
+  > `IP-Config: Complete: device=eth0, hwaddr=52:54:00:12:34:56, ipaddr=10.0.2.15, gw=10.0.2.2`
+  >
+  > Four defects were found by building it rather than by reading about it:
+  >
+  > 1. `CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES` is its own option. Without it the `virtio_mmio.device=`
+  >    parameter does not exist and the device is never probed.
+  > 2. A version 2 virtio-mmio device **must** offer `VIRTIO_F_VERSION_1` (bit 32), or the driver
+  >    refuses it: "probe with driver virtio_net failed with error -22".
+  > 3. Linux 6.12 does not build with GCC 16's C23 default: the boot decompressor needs
+  >    `-std=gnu11`, and `CONFIG_WERROR` has to be off for the rest.
+  > 4. **Open defect**: userspace writes to `/dev/console` do not appear, although `printk`
+  >    reaches @ttyS0@ and `/dev/console` opens successfully. A binary exec'd as `/workload`
+  >    runs (proven by running the init copy), but an interpreter (bash, busybox sh) produces no
+  >    output and no kernel fault. Until this is understood the in-chamber install cannot complete.
+  >    Likely candidates: which tty `/dev/console` is bound to with `CONFIG_VT` enabled, or an
+  >    interrupt/tty interaction the trimmed config exposes.
+  >
+  > The diagnostic that found all of this is `crates/dome-cli/tests/fetch_diag.rs`, kept and
+  > ignored: it boots a real chamber and prints what the guest said.
   **Acceptance Criteria**:
   - [ ] Each fragment merges without conflict with x86_64 defconfig
   - [ ] Minimal fragment produces kernel < 10 MiB

@@ -93,7 +93,13 @@ struct FlowState {
     ///
     /// The engine numbers its own direction. The guest's numbers never leave this process and the
     /// remote host's never enter it, which is what makes the translation a border.
-    next_sequence: u32,
+    send_sequence: u32,
+    /// The next byte the guest is expected to send.
+    ///
+    /// Every guest-bound segment acknowledges this. A segment that acknowledges nothing is
+    /// discarded by the guest's TCP, which then looks exactly like a black hole: the connection
+    /// is open, the data is sent, and the application never sees it.
+    acknowledge: u32,
 }
 
 impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
@@ -264,7 +270,14 @@ impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
                 return Disposition::Reply(vec![self.tcp_reset(&flow, &segment)]);
             }
 
-            self.flows.insert(flow, FlowState { next_sequence: 2 });
+            // The guest's SYN consumes one sequence number, so it expects the next byte after it.
+            self.flows.insert(
+                flow,
+                FlowState {
+                    send_sequence: 2,
+                    acknowledge: segment.sequence.wrapping_add(1),
+                },
+            );
 
             let acknowledgement = segment.sequence.wrapping_add(1);
             let syn_ack = TcpSegment {
@@ -286,11 +299,14 @@ impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
             )]);
         }
 
-        if !self.flows.contains_key(&flow) {
+        let Some(state) = self.flows.get_mut(&flow) else {
             return Disposition::Drop;
-        }
+        };
 
         if !segment.payload.is_empty() {
+            // The guest is telling us how much it sent; that is how this side knows what to
+            // acknowledge next.
+            state.acknowledge = segment.sequence.wrapping_add(segment.payload.len() as u32);
             self.relay.send(flow, &segment.payload);
         }
 
@@ -327,17 +343,14 @@ impl<R: TcpRelay, D: DnsResolver> UserNet<R, D> {
             let segment = TcpSegment {
                 source_port: flow.remote_port,
                 destination_port: flow.guest_port,
-                sequence: state.next_sequence,
-                acknowledgement: 0,
+                sequence: state.send_sequence,
+                acknowledgement: state.acknowledge,
                 flags: tcp_flags::ACK | tcp_flags::PSH,
                 window: 65535,
                 payload: data.clone(),
             };
 
-            // The guest's own numbering is not tracked, so the acknowledgement repeats the last
-            // value it saw. A guest that insists on exact acknowledgement accounting would need
-            // this to be a real counter, which is noted in T76 rather than guessed at.
-            state.next_sequence = state.next_sequence.wrapping_add(data.len() as u32);
+            state.send_sequence = state.send_sequence.wrapping_add(data.len() as u32);
 
             let bytes = segment.to_bytes(flow.remote_address, GUEST_ADDRESS);
             frames.push(self.to_guest(GUEST_ADDRESS, flow.remote_address, PROTOCOL_TCP, bytes));

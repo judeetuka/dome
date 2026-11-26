@@ -1,0 +1,16 @@
+# the kernel, built and booting
+
+# build:
+#   linux 6.12 + Dome fragment, GCC 16, make -j14 WERROR=0
+#   arch/x86/boot/bzImage   7336960 bytes   (#3)
+#   installed: ~/.local/share/dome/kernels/dome-minimal/vmlinuz
+
+# boot with the network device attached:
+#   virtio-mmio: Registering device virtio-mmio.0 at 0xd0000000-0xd0000fff, IRQ 5.
+#   virtio_net virtio0: ... (binds once VIRTIO_F_VERSION_1 is offered)
+#   IP-Config: Complete: device=eth0, hwaddr=52:54:00:12:34:56, ipaddr=10.0.2.15, gw=10.0.2.2
+#   frames from guest: 6 (ARP for the gateway)
+
+# open defect, recorded rather than papered over:
+#   userspace writes to /dev/console vanish; printk to ttyS0 works; /dev/console opens ok;
+#   binary exec as /workload runs (init copy recursed) but interpreters print nothing.

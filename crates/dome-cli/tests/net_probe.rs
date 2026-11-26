@@ -44,7 +44,10 @@ impl NetworkBackend for Recorder {
 #[test]
 fn the_kernel_probes_the_network_and_configures_the_address_from_the_command_line() {
     let root = workspace_root();
-    let kernel = root.join("tests/fixtures/kernel/vmlinuz-virt");
+    // The kernel Dome built, if it is installed; otherwise the fixture.
+    let kernels = dome_cli::kernel::kernel_root();
+    let kernel = dome_cli::kernel::resolve(&kernels, "dome-minimal")
+        .unwrap_or_else(|_| root.join("tests/fixtures/kernel/vmlinuz-virt"));
     let init = root.join("target/x86_64-unknown-linux-musl/release/dome-init");
 
     if !kernel.is_file() || !init.is_file() || !Path::new("/dev/kvm").exists() {
@@ -76,7 +79,11 @@ fn the_kernel_probes_the_network_and_configures_the_address_from_the_command_lin
     // The kernel reads this itself if it was built with CONFIG_IP_PNP.
     // The command line is plain: no ip= parameter, so the only new thing in this boot is the
     // device itself.
-    request.cmdline = "console=ttyS0 earlyprintk=ttyS0 panic=1".to_owned();
+    // Asking the kernel to configure the interface itself: with IP_PNP compiled in, this costs a
+    // command-line parameter rather than a DHCP client in userspace.
+    request.cmdline =
+        "console=ttyS0 earlyprintk=ttyS0 panic=1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off"
+            .to_owned();
     // The boot reaches init in about a second; the rest waits for nothing in particular.
     request.timeout = Duration::from_secs(5);
 
