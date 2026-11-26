@@ -43,18 +43,23 @@ Every row came from something that failed during M5 rather than from a specifica
 
 ## Which version
 
-**Latest stable by default.** A sandbox is not a server: newer kernels bring device and
-virtualisation fixes that matter more to a VMM than the conservative stability of an LTS line,
-and Dome pins the version explicitly rather than following a moving target.
+**Latest stable that boots, longterm as the fallback** - and the gap between those two is stated
+rather than glossed.
+| Line | Builds | Boots on our vCPU | Used now |
+| --- | --- | --- | --- |
+| 6.12.x (longterm) | yes, 7.34 MB | **yes** - device found, eth0 up, init runs | **yes** |
+| 7.3.6 (latest stable) | yes, 11.69 MB | no - stalls before init | no |
 
-| Line | Use |
-| --- | --- |
-| latest stable (7.3.6) | the default profile |
-| longterm (6.18.x, 6.12.x) | offered behind `--version` for whoever needs a fixed line |
+The 7.3.6 build stops at the same place every time, right after `kprobes: kprobe
+jump-optimization is enabled`, with no panic and no further output. `ibt=off` does not change it,
+so CET is not the cause. The two candidates worth testing next are `CONFIG_SMP=n` (which the
+6.12 build tolerated and a 7.x kernel may not) and a newer initcall that needs something the
+trimmed config drops. Until one of them is proven, the profile ships the kernel that boots -
+because a version number is not worth a chamber that cannot start.
 
-The version is a value in the profile, not a floating pointer: a foundation records what it was
-built with, so two images built a month apart are comparable.
+Both are built by the same command, so the comparison is one flag:
 
+`dome kernel build --version 7.3.6 --profile dome-test`
 ## Reproducing a build
 
 One command does the whole thing: fetch, configure from the checked-in fragment, build, install as
